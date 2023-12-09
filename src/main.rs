@@ -86,7 +86,7 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
                 Arc::new(Novel543::new(url_contents).expect("create Novel543 ok")),
                 url_contents,
                 dir,
-                2,
+                1,
             )
             .await
         }

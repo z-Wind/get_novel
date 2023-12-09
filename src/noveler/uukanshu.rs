@@ -29,10 +29,12 @@ impl UUkanshu {
             r"(?s)如果喜歡.*，請把網址發給您的朋友。.*",
             r"(?s)如果喜欢.*，请把网址发给您的朋友。.*",
             r"[wｗ]{3}[．\.][ｕu][ｕu][ｋk][ａa][ｎn][ｓs][ｈh][ｕu][．\.][ｃc][ｏo][ｍm]",
-            r"[ｕu][ｕu]看书\w+?\n",
-            r"[ｕu][ｕu]看书",
+            r"[ｕuＵU]{2}看书[ ]*",
+            r"[ｕuＵU]{2}看書[ ]*",
+            r"請記住本書首發域名：。：",
+            r"请记住本书首发域名：。：",
         ];
-        let replace_with = ["", "", "", "", ""]
+        let replace_with = ["", "", "", "", "", "", ""]
             .into_iter()
             .map(std::string::ToString::to_string)
             .collect();
@@ -112,6 +114,12 @@ impl Noveler for UUkanshu {
             .filter(|s| !s.is_empty())
             .collect::<Vec<&str>>()
             .join("\n");
+        text = text
+            .split("  ")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<&str>>()
+            .join("\n");
 
         Chapter { text, ..chapter }
     }
@@ -132,6 +140,10 @@ mod tests {
     static CHAPTER3: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/uukanshu/chapter3.html"
+    ));
+    static CHAPTER4: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/uukanshu/chapter4.html"
     ));
     static CONTENTS2: &[u8] = include_bytes!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -246,7 +258,22 @@ mod tests {
         let chapter = novel.process_chapter(chapter);
         dbg!(&chapter.text);
         assert!(chapter.text.starts_with("“完全猜不透他們想的什么。”"));
-        assert!(chapter.text.ends_with("請記住本書首發域名：。："));
+        assert!(chapter.text.ends_with("(本章完)"));
+    }
+
+    #[test]
+    fn test_get_chapter_content4() {
+        let novel = UUkanshu::new("https://tw.uukanshu.com/b/239329/").unwrap();
+        let html = CHAPTER4;
+        let document = visdom::Vis::load(html).unwrap();
+        let chapter = novel.get_chapter(&document, "1").unwrap();
+        assert_eq!(chapter.order, "1".to_string());
+        assert_eq!(chapter.title, "第233章 祖傳藝能！".to_string());
+        assert!(!chapter.text.is_empty());
+        let chapter = novel.process_chapter(chapter);
+        dbg!(&chapter.text);
+        assert!(chapter.text.starts_with("“喔唷，FW表示不服啊"));
+        assert!(chapter.text.ends_with("晚上還有，零點之前"));
     }
 
     #[test]

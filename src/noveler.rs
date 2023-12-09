@@ -119,7 +119,7 @@ where
     T: Noveler + std::marker::Sync + std::marker::Send + 'static,
 {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60 * 10))
+        .timeout(Duration::from_secs(60 * 3))
         .build()?;
     let document =
         get_html_and_fix_encoding(client.clone(), url_contents, noveler.need_encoding()).await?;
@@ -176,8 +176,18 @@ where
                 let permit = semaphore.clone().acquire_owned().await.expect("acquire semaphore permit");
                 tokio::spawn(async move {
                     println!("{:>10} => {order:<8}: {url}", "Process");
-                    let (chapter, next_page) = match noveler_c.process_url(client, &order, url).await {
-                        Ok(result ) => result,
+                    let (chapter, next_page) = match noveler_c.process_url(client, &order, url.clone()).await {
+                        Ok(result) => result,
+                        Err(NovelError::ReqwestError(e)) => {
+                            if e.is_timeout() {
+                                println!("{:>10} => {order:<8}: {url}", "TOutRedo");
+                                tx_c.send((order, url)).await.expect("send url ok");
+                                return Ok(());
+                            }
+
+                            error_tx_c.send(e.into()).await.expect("send error ok");
+                            panic!("noveler_c.process_url fail");
+                        }
                         Err(e) => {
                             error_tx_c.send(e).await.expect("send error ok");
                             panic!("noveler_c.process_url fail");
@@ -468,7 +478,7 @@ text_process_00010
         let url = "https://www.novel543.com/0413188175/dir";
         let noveler = Novel543::new(url).expect("create Novel543 ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, path, 2)
+        let chapter_dir = download_novel(Arc::new(noveler), url, path, 1)
             .await
             .expect("download ok");
 
