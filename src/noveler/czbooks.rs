@@ -2,6 +2,7 @@
 use super::{Book, Chapter, NovelError, Noveler};
 use aho_corasick::AhoCorasick;
 use async_trait::async_trait;
+use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
@@ -22,6 +23,12 @@ impl Czbooks {
         Ok(Self {
             replacer: (ac, replace_with),
         })
+    }
+}
+
+impl Display for Czbooks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "小說狂人")
     }
 }
 

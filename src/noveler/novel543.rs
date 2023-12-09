@@ -1,6 +1,7 @@
 /// 稷下書院 <https://www.novel543.com/>
 use super::{Book, Chapter, NovelError, Noveler};
 use async_trait::async_trait;
+use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
@@ -24,6 +25,12 @@ impl Novel543 {
         base.set_query(None);
 
         Ok(Self { base })
+    }
+}
+
+impl Display for Novel543 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "稷下書院")
     }
 }
 

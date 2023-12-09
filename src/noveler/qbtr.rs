@@ -2,6 +2,7 @@
 use super::{Book, Chapter, NovelError, Noveler};
 use async_trait::async_trait;
 //use regex::Regex;
+use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
@@ -25,6 +26,12 @@ impl Qbtr {
         base.set_query(None);
 
         Ok(Self { base })
+    }
+}
+
+impl Display for Qbtr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "全本同人")
     }
 }
 

@@ -1,8 +1,11 @@
 use async_trait::async_trait;
 use reqwest::{Client, IntoUrl};
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::io::Write;
+use std::panic;
 use std::sync::Arc;
+use std::time::Duration;
 use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
@@ -72,7 +75,7 @@ impl Chapter {
 }
 
 #[async_trait]
-pub(crate) trait Noveler {
+pub(crate) trait Noveler: Display {
     fn need_encoding(&self) -> Option<&'static encoding_rs::Encoding> {
         None
     }
@@ -115,7 +118,9 @@ pub(crate) async fn download_novel<'a, 'b, T>(
 where
     T: Noveler + std::marker::Sync + std::marker::Send + 'static,
 {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60 * 10))
+        .build()?;
     let document =
         get_html_and_fix_encoding(client.clone(), url_contents, noveler.need_encoding()).await?;
     // fs::write("test.html", document.html()).unwrap();
@@ -125,7 +130,10 @@ where
     let urls = noveler.get_chapter_urls_sorted(&document)?;
     let urls = noveler.append_urls_with_orders(urls);
 
-    let dir = dir.join("temp").join(book.to_string());
+    let dir = dir
+        .join("temp")
+        .join(noveler.to_string())
+        .join(book.to_string());
     tokio::fs::create_dir_all(dir.as_path()).await?;
 
     let file_name = |order: &str| format!("{order}.txt");
@@ -134,6 +142,7 @@ where
     let semaphore = Arc::new(Semaphore::new(limit)); // Adjust the concurrency limit as needed
     let (tx, mut rx) = mpsc::channel::<(String, Url)>(5);
     let (task_tx, mut task_rx) = mpsc::channel::<i32>(1);
+    let (error_tx, mut error_rx) = mpsc::channel::<NovelError>(1);
 
     let mut tasks = i32::try_from(urls.len()).expect("usize to i32 ok");
     let tx_c = tx.clone();
@@ -156,22 +165,36 @@ where
                 }
                 set.insert(url.clone());
 
-                println!("{:>10} => {order}: {url}", "Insert");
+                println!("{:>10} => {order:<8}: {url}", "Insert");
 
                 let tx_c = tx.clone();
                 let task_tx_c = task_tx.clone();
+                let error_tx_c = error_tx.clone();
                 let noveler_c = noveler.clone();
                 let dir_c = dir.clone();
                 let client = client.clone();
                 let permit = semaphore.clone().acquire_owned().await.expect("acquire semaphore permit");
                 tokio::spawn(async move {
-                    println!("{:>10} => {order}: {url}", "Process");
-                    let (chapter, next_page) = noveler_c.process_url(client, &order, url).await?;
+                    println!("{:>10} => {order:<8}: {url}", "Process");
+                    let (chapter, next_page) = match noveler_c.process_url(client, &order, url).await {
+                        Ok(result ) => result,
+                        Err(e) => {
+                            error_tx_c.send(e).await.expect("send error ok");
+                            panic!("noveler_c.process_url fail");
+                        },
+                    };
+
+                    // Release the semaphore permit
+                    drop(permit);
+
                     let mut tasks_done = 0;
 
-                    tokio::fs::write(dir_c.join(file_name(&order)), chapter.content()).await?;
+                    if let Err(e) = tokio::fs::write(dir_c.join(file_name(&order)), chapter.content()).await {
+                        error_tx_c.send(e.into()).await.expect("send error ok");
+                        panic!("tokio::fs::write fail");
+                    };
                     tasks_done -= 1;
-                    println!("{:>10} => {order}", "Done");
+                    println!("{:>10} => {order:<8}", "Done");
 
                     if let Some(next_page_url) = next_page {
                         tasks_done += 1;
@@ -184,13 +207,15 @@ where
                         task_tx_c.send(tasks_done).await.expect("send task ok");
                     });
 
-                    drop(permit);
                     Ok::<(), NovelError>(())
                 });
             }
             Some(task) = task_rx.recv() => {
                 tasks += task;
                 println!("{:<10} => {tasks:05}", "Tasks");
+            }
+            Some(error) = error_rx.recv() => {
+                return Err(error);
             }
         };
     }
@@ -305,6 +330,11 @@ mod tests {
                 re: Regex::new(r"text").expect("pattern"),
                 host,
             }
+        }
+    }
+    impl Display for FakeNoveler {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "FakeNoveler")
         }
     }
     #[async_trait]

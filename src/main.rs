@@ -61,7 +61,9 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
             )
             .await
         }
-        _ if url_contents.starts_with("https://tw.uukanshu.com/") => {
+        _ if url_contents.starts_with("https://tw.uukanshu.com/")
+            || url_contents.starts_with("https://www.uukanshu.com/") =>
+        {
             download_novel(
                 Arc::new(UUkanshu::new(url_contents).expect("create UUkanshu ok")),
                 url_contents,

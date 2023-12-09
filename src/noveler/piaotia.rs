@@ -2,6 +2,7 @@
 use super::{Book, Chapter, NovelError, Noveler};
 use async_trait::async_trait;
 use regex::Regex;
+use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
@@ -28,6 +29,12 @@ impl Piaotia {
             base,
             replacer: (regexes, replace_with),
         })
+    }
+}
+
+impl Display for Piaotia {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "飄天")
     }
 }
 
