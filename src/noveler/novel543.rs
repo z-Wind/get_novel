@@ -180,7 +180,7 @@ mod tests {
         let url = novel.get_next_page(&document).unwrap().unwrap();
         assert_eq!(
             url,
-            Url::parse("https://www.novel543.com/0413188175/8001_316_2.html").unwrap(),
+            Url::parse("https://www.novel543.com/0413188175/8001_1_2.html").unwrap(),
         );
     }
 }

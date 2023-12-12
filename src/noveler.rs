@@ -61,7 +61,7 @@ impl fmt::Display for Book {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Chapter {
     order: String,
     title: String,
@@ -109,10 +109,69 @@ pub(crate) trait Noveler: Display {
     fn process_chapter(&self, chapter: Chapter) -> Chapter;
 }
 
-pub(crate) async fn download_novel<'a, 'b, T>(
+fn file_name(order: &str) -> String {
+    format!("{order}.txt")
+}
+
+fn process_url_contents<'a, T>(
+    noveler: &Arc<T>,
+    document: &'a Elements<'a>,
+    dir: &Path,
+    tx: mpsc::Sender<(String, Url)>,
+) -> Result<i32, NovelError>
+where
+    T: Noveler + std::marker::Sync + std::marker::Send + 'static,
+{
+    let urls = noveler.get_chapter_urls_sorted(document)?;
+    let urls = noveler.append_urls_with_orders(urls);
+    let urls = remove_url_with_exist_file(urls, dir);
+
+    let tasks = i32::try_from(urls.len()).expect("usize to i32 ok");
+    tokio::spawn(async move {
+        for url in urls {
+            tx.send(url).await.expect("send url ok");
+        }
+    });
+
+    Ok(tasks)
+}
+
+async fn process_save_task(
+    chapter: Chapter,
+    next_page: Option<Url>,
+    dir: &Path,
+    tx: mpsc::Sender<(String, Url)>,
+    task_tx: mpsc::Sender<i32>,
+    error_tx: mpsc::Sender<NovelError>,
+) -> Result<(), NovelError> {
+    let mut tasks_done = 0;
+
+    if let Err(e) = tokio::fs::write(dir.join(file_name(&chapter.order)), chapter.content()).await {
+        error_tx.send(e.into()).await.expect("send error ok");
+        panic!("tokio::fs::write fail");
+    };
+    tasks_done -= 1;
+    println!("{:>10} => {:<8}", "Done", chapter.order);
+
+    if let Some(next_page_url) = next_page {
+        tasks_done += 1;
+        tokio::spawn(async move {
+            let url = (chapter.order + "_n", next_page_url);
+            tx.send(url).await.expect("send url ok");
+        });
+    }
+
+    tokio::spawn(async move {
+        task_tx.send(tasks_done).await.expect("send task ok");
+    });
+
+    Ok(())
+}
+
+pub(crate) async fn download_novel<'a, T>(
     noveler: Arc<T>,
     url_contents: &'a str,
-    dir: &'b Path,
+    dir: &Path,
     limit: usize,
 ) -> Result<PathBuf, NovelError>
 where
@@ -127,32 +186,19 @@ where
     let document = visdom::Vis::load(document)?;
 
     let book = noveler.get_book_info(&document)?;
-    let urls = noveler.get_chapter_urls_sorted(&document)?;
-    let urls = noveler.append_urls_with_orders(urls);
-
     let dir = dir
         .join("temp")
         .join(noveler.to_string())
         .join(book.to_string());
     tokio::fs::create_dir_all(dir.as_path()).await?;
 
-    let file_name = |order: &str| format!("{order}.txt");
-    let urls = remove_url_with_exist_file(urls, &dir, file_name);
-
     let semaphore = Arc::new(Semaphore::new(limit)); // Adjust the concurrency limit as needed
     let (tx, mut rx) = mpsc::channel::<(String, Url)>(5);
     let (task_tx, mut task_rx) = mpsc::channel::<i32>(1);
     let (error_tx, mut error_rx) = mpsc::channel::<NovelError>(1);
 
-    let mut tasks = i32::try_from(urls.len()).expect("usize to i32 ok");
-    let tx_c = tx.clone();
-    tokio::spawn(async move {
-        for url in urls {
-            tx_c.send(url).await.expect("send url ok");
-        }
-    });
-
     let mut set = HashSet::new();
+    let mut tasks = process_url_contents(&noveler, &document, &dir, tx.clone())?;
     while tasks > 0 {
         tokio::select! {
             Some((order, url)) = rx.recv() => {
@@ -196,26 +242,7 @@ where
 
                     // Release the semaphore permit
                     drop(permit);
-
-                    let mut tasks_done = 0;
-
-                    if let Err(e) = tokio::fs::write(dir_c.join(file_name(&order)), chapter.content()).await {
-                        error_tx_c.send(e.into()).await.expect("send error ok");
-                        panic!("tokio::fs::write fail");
-                    };
-                    tasks_done -= 1;
-                    println!("{:>10} => {order:<8}", "Done");
-
-                    if let Some(next_page_url) = next_page {
-                        tasks_done += 1;
-                        tokio::spawn(async move {
-                            let url = (order + "_n" ,next_page_url);
-                            tx_c.send(url).await.expect("send url ok");
-                        });
-                    }
-                    tokio::spawn(async move {
-                        task_tx_c.send(tasks_done).await.expect("send task ok");
-                    });
+                    process_save_task(chapter, next_page, &dir_c, tx_c, task_tx_c, error_tx_c).await?;
 
                     Ok::<(), NovelError>(())
                 });
@@ -280,11 +307,7 @@ async fn get_html_and_fix_encoding<T: IntoUrl>(
     }
 }
 
-fn remove_url_with_exist_file(
-    urls: Vec<(String, Url)>,
-    dir: &Path,
-    file_name: impl Fn(&str) -> String,
-) -> Vec<(String, Url)> {
+fn remove_url_with_exist_file(urls: Vec<(String, Url)>, dir: &Path) -> Vec<(String, Url)> {
     urls.into_iter()
         .filter(|(order, _)| !dir.join(file_name(order)).is_file())
         .collect()
@@ -382,6 +405,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_process_url_contents() {
+        // Request a new server from the pool
+        let server = mockito::Server::new();
+
+        // Use one of these addresses to configure your client
+        let url = server.url();
+
+        let fake = Arc::new(FakeNoveler::new(url));
+        let dir = TempDir::new("noveler_test_process_url_contents").unwrap();
+        let path = dir.path();
+        let (tx, _) = mpsc::channel::<(String, Url)>(5);
+
+        let contents: &str = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/hjwzw/contents.html"
+        ));
+        let document = visdom::Vis::load(contents).unwrap();
+
+        let result = process_url_contents(&fake, &document, path, tx).unwrap();
+        assert_eq!(result, 10);
+    }
+
+    #[tokio::test]
+    async fn test_process_save_task() {
+        let dir = TempDir::new("noveler_test_process_save_task").unwrap();
+        let path = dir.path();
+
+        let (tx, _) = mpsc::channel::<(String, Url)>(5);
+        let (task_tx, mut task_rx) = mpsc::channel::<i32>(1);
+        let (error_tx, _) = mpsc::channel::<NovelError>(1);
+
+        let chapter = Chapter {
+            order: "order".to_string(),
+            title: "title".to_string(),
+            text: "text".to_string(),
+        };
+        process_save_task(chapter.clone(), None, path, tx, task_tx, error_tx)
+            .await
+            .unwrap();
+
+        while (task_rx.recv().await).is_some() {}
+
+        let file_path = path.join(file_name(&chapter.order));
+        dbg!(&file_path);
+        assert!(file_path.is_file());
+        assert_eq!(fs::read_to_string(file_path).unwrap(), "title\n\ntext");
+    }
+
+    #[tokio::test]
     async fn test_basic_noveler() {
         // Request a new server from the pool
         let server = mockito::Server::new();
@@ -396,19 +468,21 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(path.join("temp/author_name/00001.txt").exists());
-        assert!(path.join("temp/author_name/00001_n.txt").exists());
-        assert!(path.join("temp/author_name/00002.txt").exists());
-        assert!(path.join("temp/author_name/00003.txt").exists());
-        assert!(path.join("temp/author_name/00004.txt").exists());
-        assert!(path.join("temp/author_name/00005.txt").exists());
-        assert!(path.join("temp/author_name/00006.txt").exists());
-        assert!(path.join("temp/author_name/00007.txt").exists());
-        assert!(path.join("temp/author_name/00008.txt").exists());
-        assert!(path.join("temp/author_name/00009.txt").exists());
-        assert!(path.join("temp/author_name/00010.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00001.txt").exists());
+        assert!(path
+            .join("temp/FakeNoveler/author_name/00001_n.txt")
+            .exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00002.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00003.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00004.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00005.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00006.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00007.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00008.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00009.txt").exists());
+        assert!(path.join("temp/FakeNoveler/author_name/00010.txt").exists());
         assert_eq!(
-            tokio::fs::read_to_string(path.join("temp/author_name/00001.txt"))
+            tokio::fs::read_to_string(path.join("temp/FakeNoveler/author_name/00001.txt"))
                 .await
                 .unwrap(),
             "title_00001\n\ntext_process_00001"
@@ -416,7 +490,7 @@ mod tests {
 
         combine_txt(&chapter_dir).unwrap();
         assert_eq!(
-            tokio::fs::read_to_string(path.join("temp/author_name.txt"))
+            tokio::fs::read_to_string(path.join("temp/FakeNoveler/author_name.txt"))
                 .await
                 .unwrap(),
             r#"title_00001
