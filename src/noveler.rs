@@ -12,6 +12,7 @@ use std::{
 };
 use thiserror::Error;
 use tokio::sync::{mpsc, Semaphore};
+use tokio::task::JoinSet;
 use url::Url;
 use visdom::types::Elements;
 
@@ -96,14 +97,17 @@ pub(crate) trait Noveler: Display {
 
         Ok((chapter, next_page))
     }
+
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError>;
     fn get_chapter_urls_sorted(&self, document: &Elements) -> Result<Vec<Url>, NovelError>;
+
     fn append_urls_with_orders(&self, urls: Vec<Url>) -> Vec<(String, Url)> {
         urls.into_iter()
             .enumerate()
             .map(|(i, url)| (format!("{:05}", i + 1), url))
             .collect()
     }
+
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError>;
     fn get_next_page(&self, document: &Elements) -> Result<Option<Url>, NovelError>;
     fn process_chapter(&self, chapter: Chapter) -> Chapter;
@@ -123,13 +127,15 @@ where
     T: Noveler + std::marker::Sync + std::marker::Send + 'static,
 {
     let urls = noveler.get_chapter_urls_sorted(document)?;
-    let urls = noveler.append_urls_with_orders(urls);
-    let urls = remove_url_with_exist_file(urls, dir);
+    let mut urls = noveler.append_urls_with_orders(urls);
+    urls = remove_url_with_exist_file(urls, dir);
 
     let tasks = i32::try_from(urls.len()).expect("usize to i32 ok");
     tokio::spawn(async move {
         for url in urls {
-            tx.send(url).await.expect("send url ok");
+            if let Err(err) = tx.send(url).await {
+                eprintln!("Failed to send url: {err}");
+            }
         }
     });
 
@@ -141,31 +147,23 @@ async fn process_save_task(
     next_page: Option<Url>,
     dir: &Path,
     tx: mpsc::Sender<(String, Url)>,
-    task_tx: mpsc::Sender<i32>,
-    error_tx: mpsc::Sender<NovelError>,
-) -> Result<(), NovelError> {
-    let mut tasks_done = 0;
+) -> Result<i32, NovelError> {
+    tokio::fs::write(dir.join(file_name(&chapter.order)), chapter.content()).await?;
 
-    if let Err(e) = tokio::fs::write(dir.join(file_name(&chapter.order)), chapter.content()).await {
-        error_tx.send(e.into()).await.expect("send error ok");
-        panic!("tokio::fs::write fail");
-    };
-    tasks_done -= 1;
     println!("{:>10} => {:<8}", "Done", chapter.order);
 
+    let mut tasks_done = -1;
     if let Some(next_page_url) = next_page {
         tasks_done += 1;
         tokio::spawn(async move {
             let url = (chapter.order + "_n", next_page_url);
-            tx.send(url).await.expect("send url ok");
+            if let Err(err) = tx.send(url).await {
+                eprintln!("Failed to send url: {err}");
+            }
         });
     }
 
-    tokio::spawn(async move {
-        task_tx.send(tasks_done).await.expect("send task ok");
-    });
-
-    Ok(())
+    Ok(tasks_done)
 }
 
 pub(crate) async fn download_novel<'a, T>(
@@ -180,12 +178,14 @@ where
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60 * 3))
         .build()?;
+
     let document =
         get_html_and_fix_encoding(client.clone(), url_contents, noveler.need_encoding()).await?;
     // fs::write("test.html", document.html()).unwrap();
     let document = visdom::Vis::load(document)?;
 
     let book = noveler.get_book_info(&document)?;
+
     let dir = dir
         .join("temp")
         .join(noveler.to_string())
@@ -193,19 +193,17 @@ where
     tokio::fs::create_dir_all(dir.as_path()).await?;
 
     let semaphore = Arc::new(Semaphore::new(limit)); // Adjust the concurrency limit as needed
-    let (tx, mut rx) = mpsc::channel::<(String, Url)>(5);
-    let (task_tx, mut task_rx) = mpsc::channel::<i32>(1);
-    let (error_tx, mut error_rx) = mpsc::channel::<NovelError>(1);
+    let (tx, mut rx) = mpsc::channel::<(String, Url)>(10);
 
     let mut set = HashSet::new();
     let mut tasks = process_url_contents(&noveler, &document, &dir, tx.clone())?;
+    let mut join_set: JoinSet<Result<i32, NovelError>> = JoinSet::new();
     while tasks > 0 {
         tokio::select! {
             Some((order, url)) = rx.recv() => {
                 if set.contains(&url) {
-                    let task_tx_c = task_tx.clone();
-                    tokio::spawn(async move {
-                        task_tx_c.send(-1).await.expect("send task ok");
+                    join_set.spawn(async move {
+                        Ok(-1)
                     });
                     continue;
                 }
@@ -214,45 +212,48 @@ where
                 println!("{:>10} => {order:<8}: {url}", "Insert");
 
                 let tx_c = tx.clone();
-                let task_tx_c = task_tx.clone();
-                let error_tx_c = error_tx.clone();
                 let noveler_c = noveler.clone();
                 let dir_c = dir.clone();
                 let client = client.clone();
                 let permit = semaphore.clone().acquire_owned().await.expect("acquire semaphore permit");
-                tokio::spawn(async move {
+                join_set.spawn(async move {
                     println!("{:>10} => {order:<8}: {url}", "Process");
                     let (chapter, next_page) = match noveler_c.process_url(client, &order, url.clone()).await {
                         Ok(result) => result,
                         Err(NovelError::ReqwestError(e)) => {
                             if e.is_timeout() {
                                 println!("{:>10} => {order:<8}: {url}", "TOutRedo");
-                                tx_c.send((order, url)).await.expect("send url ok");
-                                return Ok(());
+                                if let Err(err) = tx_c.send((order, url)).await {
+                                    eprintln!("Failed to send url: {err}");
+                                }
+                                return Ok(0);
                             }
 
-                            error_tx_c.send(e.into()).await.expect("send error ok");
-                            panic!("noveler_c.process_url fail");
+                            return Err(e.into());
                         }
                         Err(e) => {
-                            error_tx_c.send(e).await.expect("send error ok");
-                            panic!("noveler_c.process_url fail");
+                            return Err(e);
                         },
                     };
 
                     // Release the semaphore permit
                     drop(permit);
-                    process_save_task(chapter, next_page, &dir_c, tx_c, task_tx_c, error_tx_c).await?;
-
-                    Ok::<(), NovelError>(())
+                    process_save_task(chapter, next_page, &dir_c, tx_c).await
                 });
             }
-            Some(task) = task_rx.recv() => {
-                tasks += task;
-                println!("{:<10} => {tasks:05}", "Tasks");
-            }
-            Some(error) = error_rx.recv() => {
-                return Err(error);
+            Some(result) = join_set.join_next() => {
+                match result {
+                    Ok(result) => {
+                        tasks += result?;
+                        println!("{:<10} => {tasks:05}", "Tasks");
+                    }
+                    Err(join_error) => {
+                        eprintln!("Async task failed: {join_error:?}");
+                        if join_error.is_panic() {
+                            eprintln!("Async task panicked!");
+                        }
+                    }
+                }
             }
         };
     }
@@ -319,6 +320,7 @@ mod tests {
     use async_trait::async_trait;
     use chardetng::EncodingDetector;
     use regex::Regex;
+    use std::sync::atomic::{AtomicI32, Ordering};
     use tempdir::TempDir;
 
     async fn guess_coding<T: IntoUrl>(url: T) -> (&'static encoding_rs::Encoding, bool) {
@@ -356,20 +358,25 @@ mod tests {
     struct FakeNoveler {
         re: Regex,
         host: String,
+        num: AtomicI32,
     }
+
     impl FakeNoveler {
         fn new(host: String) -> Self {
             Self {
                 re: Regex::new(r"text").expect("pattern"),
                 host,
+                num: AtomicI32::new(1),
             }
         }
     }
+
     impl Display for FakeNoveler {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             write!(f, "FakeNoveler")
         }
     }
+
     #[async_trait]
     impl Noveler for FakeNoveler {
         fn get_book_info(&self, _document: &Elements) -> Result<Book, NovelError> {
@@ -377,22 +384,32 @@ mod tests {
             let author = "author".to_string();
             Ok(Book { name, author })
         }
+
         fn get_chapter_urls_sorted(&self, _document: &Elements) -> Result<Vec<Url>, NovelError> {
             Ok((1..)
                 .take(10)
                 .map(|n| Url::parse(&format!("{}/{}", &self.host, n)).unwrap())
                 .collect())
         }
+
         fn get_chapter(&self, _document: &Elements, order: &str) -> Result<Chapter, NovelError> {
             let title = format!("title_{order}");
             let text = format!("text_{order}");
             let order = order.to_string();
             Ok(Chapter { order, title, text })
         }
+
         fn get_next_page(&self, _document: &Elements) -> Result<Option<Url>, NovelError> {
-            let url = Url::parse(&format!("{}/next_page", &self.host))?;
-            Ok(Some(url))
+            let num = self.num.fetch_add(1, Ordering::SeqCst);
+
+            if num > 10 {
+                Ok(None)
+            } else {
+                let url = Url::parse(&format!("{}/next_page/{num}", &self.host))?;
+                Ok(Some(url))
+            }
         }
+
         fn process_chapter(&self, chapter: Chapter) -> Chapter {
             Chapter {
                 text: self
@@ -433,19 +450,15 @@ mod tests {
         let path = dir.path();
 
         let (tx, _) = mpsc::channel::<(String, Url)>(5);
-        let (task_tx, mut task_rx) = mpsc::channel::<i32>(1);
-        let (error_tx, _) = mpsc::channel::<NovelError>(1);
 
         let chapter = Chapter {
             order: "order".to_string(),
             title: "title".to_string(),
             text: "text".to_string(),
         };
-        process_save_task(chapter.clone(), None, path, tx, task_tx, error_tx)
+        process_save_task(chapter.clone(), None, path, tx)
             .await
             .unwrap();
-
-        while (task_rx.recv().await).is_some() {}
 
         let file_path = path.join(file_name(&chapter.order));
         dbg!(&file_path);
@@ -505,37 +518,73 @@ title_00002
 
 text_process_00002
 
+title_00002_n
+
+text_process_00002_n
+
 title_00003
 
 text_process_00003
+
+title_00003_n
+
+text_process_00003_n
 
 title_00004
 
 text_process_00004
 
+title_00004_n
+
+text_process_00004_n
+
 title_00005
 
 text_process_00005
+
+title_00005_n
+
+text_process_00005_n
 
 title_00006
 
 text_process_00006
 
+title_00006_n
+
+text_process_00006_n
+
 title_00007
 
 text_process_00007
+
+title_00007_n
+
+text_process_00007_n
 
 title_00008
 
 text_process_00008
 
+title_00008_n
+
+text_process_00008_n
+
 title_00009
 
 text_process_00009
 
+title_00009_n
+
+text_process_00009_n
+
 title_00010
 
 text_process_00010
+
+title_00010_n
+
+text_process_00010_n
 
 "#
         );
@@ -615,6 +664,7 @@ text_process_00010
         dir.close().unwrap();
     }
 
+    #[ignore = "only for compare"]
     #[test]
     fn test_compare_parser() {
         let html = include_str!(concat!(
