@@ -211,34 +211,37 @@ where
 
                 println!("{:>10} => {order:<8}: {url}", "Insert");
 
-                let tx_c = tx.clone();
-                let noveler_c = noveler.clone();
-                let dir_c = dir.clone();
-                let client = client.clone();
-                let permit = semaphore.clone().acquire_owned().await.expect("acquire semaphore permit");
-                join_set.spawn(async move {
-                    println!("{:>10} => {order:<8}: {url}", "Process");
-                    let (chapter, next_page) = match noveler_c.process_url(client, &order, url.clone()).await {
-                        Ok(result) => result,
-                        Err(NovelError::ReqwestError(e)) => {
-                            if e.is_timeout() {
-                                println!("{:>10} => {order:<8}: {url}", "TOutRedo");
-                                if let Err(err) = tx_c.send((order, url)).await {
-                                    eprintln!("Failed to send url: {err}");
+                join_set.spawn({
+                    let tx = tx.clone();
+                    let noveler = noveler.clone();
+                    let dir = dir.clone();
+                    let client = client.clone();
+                    let permit = semaphore.clone().acquire_owned().await.expect("acquire semaphore permit");
+
+                    async move {
+                        println!("{:>10} => {order:<8}: {url}", "Process");
+                        let (chapter, next_page) = match noveler.process_url(client, &order, url.clone()).await {
+                            Ok(result) => result,
+                            Err(NovelError::ReqwestError(e)) => {
+                                if e.is_timeout() {
+                                    println!("{:>10} => {order:<8}: {url}", "TOutRedo");
+                                    if let Err(err) = tx.send((order, url)).await {
+                                        eprintln!("Failed to send url: {err}");
+                                    }
+                                    return Ok(0);
                                 }
-                                return Ok(0);
+
+                                return Err(e.into());
                             }
+                            Err(e) => {
+                                return Err(e);
+                            },
+                        };
 
-                            return Err(e.into());
-                        }
-                        Err(e) => {
-                            return Err(e);
-                        },
-                    };
-
-                    // Release the semaphore permit
-                    drop(permit);
-                    process_save_task(chapter, next_page, &dir_c, tx_c).await
+                        // Release the semaphore permit
+                        drop(permit);
+                        process_save_task(chapter, next_page, &dir, tx).await
+                    }
                 });
             }
             Some(result) = join_set.join_next() => {
