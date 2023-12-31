@@ -1,7 +1,6 @@
 /// 小說狂人 <https://czbooks.net/>
 use super::{Book, Chapter, NovelError, Noveler};
 use aho_corasick::AhoCorasick;
-use async_trait::async_trait;
 use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
@@ -32,7 +31,6 @@ impl Display for Czbooks {
     }
 }
 
-#[async_trait]
 impl Noveler for Czbooks {
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
         let selector = r"span.title";

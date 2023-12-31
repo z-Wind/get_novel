@@ -1,6 +1,5 @@
 /// 稷下書院 <https://www.novel543.com/>
 use super::{Book, Chapter, NovelError, Noveler};
-use async_trait::async_trait;
 use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
@@ -34,7 +33,6 @@ impl Display for Novel543 {
     }
 }
 
-#[async_trait]
 impl Noveler for Novel543 {
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
         let selector = r"h1.title.is-2";

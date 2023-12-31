@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use reqwest::{Client, IntoUrl};
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -75,27 +74,28 @@ impl Chapter {
     }
 }
 
-#[async_trait]
-pub(crate) trait Noveler: Display {
+pub trait Noveler: Display + Sync + Send + 'static {
     fn need_encoding(&self) -> Option<&'static encoding_rs::Encoding> {
         None
     }
 
-    async fn process_url(
+    fn process_url(
         &self,
         client: Client,
         order: &str,
         url: Url,
-    ) -> Result<(Chapter, Option<Url>), NovelError> {
-        let document = get_html_and_fix_encoding(client, url, self.need_encoding()).await?;
-        let document = visdom::Vis::load(document)?;
+    ) -> impl std::future::Future<Output = Result<(Chapter, Option<Url>), NovelError>> + Send {
+        async {
+            let document = get_html_and_fix_encoding(client, url, self.need_encoding()).await?;
+            let document = visdom::Vis::load(document)?;
 
-        let mut chapter: Chapter = self.get_chapter(&document, order)?;
-        chapter = self.process_chapter(chapter);
+            let mut chapter: Chapter = self.get_chapter(&document, order)?;
+            chapter = self.process_chapter(chapter);
 
-        let next_page = self.get_next_page(&document)?;
+            let next_page = self.get_next_page(&document)?;
 
-        Ok((chapter, next_page))
+            Ok((chapter, next_page))
+        }
     }
 
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError>;
@@ -117,15 +117,12 @@ fn file_name(order: &str) -> String {
     format!("{order}.txt")
 }
 
-fn process_url_contents<'a, T>(
-    noveler: &Arc<T>,
-    document: &'a Elements<'a>,
+fn process_url_contents(
+    noveler: &Arc<impl Noveler>,
+    document: &Elements,
     dir: &Path,
     tx: mpsc::Sender<(String, Url)>,
-) -> Result<i32, NovelError>
-where
-    T: Noveler + std::marker::Sync + std::marker::Send + 'static,
-{
+) -> Result<i32, NovelError> {
     let urls = noveler.get_chapter_urls_sorted(document)?;
     let mut urls = noveler.append_urls_with_orders(urls);
     urls = remove_url_with_exist_file(urls, dir);
@@ -166,15 +163,12 @@ async fn process_save_task(
     Ok(tasks_done)
 }
 
-pub(crate) async fn download_novel<'a, T>(
-    noveler: Arc<T>,
-    url_contents: &'a str,
+pub(crate) async fn download_novel(
+    noveler: Arc<impl Noveler>,
+    url_contents: &str,
     dir: &Path,
     limit: usize,
-) -> Result<PathBuf, NovelError>
-where
-    T: Noveler + std::marker::Sync + std::marker::Send + 'static,
-{
+) -> Result<PathBuf, NovelError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60 * 3))
         .build()?;
@@ -320,7 +314,6 @@ fn remove_url_with_exist_file(urls: Vec<(String, Url)>, dir: &Path) -> Vec<(Stri
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use chardetng::EncodingDetector;
     use regex::Regex;
     use std::sync::atomic::{AtomicI32, Ordering};
@@ -380,7 +373,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl Noveler for FakeNoveler {
         fn get_book_info(&self, _document: &Elements) -> Result<Book, NovelError> {
             let name = "name".to_string();

@@ -1,6 +1,5 @@
 /// 黃金屋 <https://tw.hjwzw.com/>
 use super::{Book, Chapter, NovelError, Noveler};
-use async_trait::async_trait;
 use regex::Regex;
 use std::fmt::{self, Display};
 use url::Url;
@@ -48,7 +47,6 @@ impl Display for Hjwzw {
     }
 }
 
-#[async_trait]
 impl Noveler for Hjwzw {
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
         let selector = r"h1";

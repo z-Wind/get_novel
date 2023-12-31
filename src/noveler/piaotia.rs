@@ -1,6 +1,5 @@
 /// 飄天 <https://www.piaotia.com/>
 use super::{Book, Chapter, NovelError, Noveler};
-use async_trait::async_trait;
 use regex::Regex;
 use std::fmt::{self, Display};
 use url::Url;
@@ -38,7 +37,6 @@ impl Display for Piaotia {
     }
 }
 
-#[async_trait]
 impl Noveler for Piaotia {
     fn need_encoding(&self) -> Option<&'static encoding_rs::Encoding> {
         Some(encoding_rs::GBK)
