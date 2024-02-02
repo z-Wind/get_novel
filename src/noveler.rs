@@ -395,7 +395,7 @@ mod tests {
         }
 
         fn get_next_page(&self, _document: &Elements) -> Result<Option<Url>, NovelError> {
-            let num = self.num.fetch_add(1, Ordering::SeqCst);
+            let num = self.num.fetch_add(1, Ordering::Relaxed);
 
             if num > 10 {
                 Ok(None)
