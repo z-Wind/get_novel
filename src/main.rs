@@ -62,7 +62,9 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
             .await
         }
         _ if url_contents.starts_with("https://tw.uukanshu.com/")
-            || url_contents.starts_with("https://www.uukanshu.com/") =>
+            || url_contents.starts_with("https://tw.uukanshu.net/")
+            || url_contents.starts_with("https://www.uukanshu.com/")
+            || url_contents.starts_with("https://www.uukanshu.net/") =>
         {
             download_novel(
                 Arc::new(UUkanshu::new(url_contents).expect("create UUkanshu ok")),
@@ -99,7 +101,7 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
             )
             .await
         }
-        _ => panic!("Not support"),
+        url => panic!("Not support {url}"),
     };
 
     result.expect("download ok")
