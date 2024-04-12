@@ -419,7 +419,7 @@ mod tests {
     #[tokio::test]
     async fn test_process_url_contents() {
         // Request a new server from the pool
-        let server = mockito::Server::new();
+        let server = mockito::Server::new_async().await;
 
         // Use one of these addresses to configure your client
         let url = server.url();
@@ -464,7 +464,7 @@ mod tests {
     #[tokio::test]
     async fn test_basic_noveler() {
         // Request a new server from the pool
-        let server = mockito::Server::new();
+        let server = mockito::Server::new_async().await;
 
         // Use one of these addresses to configure your client
         let url = server.url();
@@ -501,7 +501,7 @@ mod tests {
             tokio::fs::read_to_string(path.join("temp/FakeNoveler/author_name.txt"))
                 .await
                 .unwrap(),
-            r#"title_00001
+            r"title_00001
 
 text_process_00001
 
@@ -581,7 +581,7 @@ title_00010_n
 
 text_process_00010_n
 
-"#
+"
         );
 
         dir.close().unwrap();

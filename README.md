@@ -1,4 +1,5 @@
 # getNovel - download novel to txt
+[![CI](https://github.com/z-Wind/get_novel/actions/workflows/ci.yml/badge.svg)](https://github.com/z-Wind/get_novel/actions/workflows/ci.yml)
 
 ## Table of Contents
 
