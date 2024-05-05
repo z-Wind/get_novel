@@ -14,8 +14,8 @@ impl Piaotia {
     pub(crate) fn new(url: &str) -> Result<Self, NovelError> {
         let base = Url::parse(url)?;
 
-        let patterns = ["(?s)（快捷键 ←）.*", "(?s).*返回书页"];
-        let replace_with = ["", ""]
+        let patterns = ["(?s)（快捷键 .*", "(?s).*返回书页", "本站网站"];
+        let replace_with = ["", "", ""]
             .into_iter()
             .map(std::string::ToString::to_string)
             .collect();
@@ -71,12 +71,7 @@ impl Noveler for Piaotia {
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
         let selector = r"H1";
-        let title = document
-            .find(selector)
-            .text()
-            .trim()
-            .replace("射手凶猛 ", "")
-            .to_string();
+        let title = document.find(selector).text().trim().to_string();
 
         let selector = r"html";
         let text: String = document.find(selector).text();
@@ -118,6 +113,10 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/piaotia/chapter.html"
     ));
+    static CHAPTER2: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/piaotia/chapter2.html"
+    ));
 
     #[test]
     fn test_get_book_info() {
@@ -157,11 +156,28 @@ mod tests {
         let document = visdom::Vis::load(html).unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
         assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(chapter.title, "第一章 老地方".to_string());
+        assert_eq!(chapter.title, "射手凶猛 第一章 老地方".to_string());
         let chapter = novel.process_chapter(chapter);
         dbg!(&chapter.text);
         assert!(chapter.text.starts_with("六月的首都日渐炎热。"));
         assert!(chapter.text.ends_with("“开个机子。”"));
+    }
+
+    #[test]
+    fn test_get_chapter_content_2() {
+        let novel = Piaotia::new("https://www.piaotia.com/html/15/15299/").unwrap();
+        let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER2);
+        let document = visdom::Vis::load(html).unwrap();
+        let chapter = novel.get_chapter(&document, "1").unwrap();
+        assert_eq!(chapter.order, "1".to_string());
+        assert_eq!(
+            chapter.title,
+            "我本无意成仙  第1章 一笑出门去，千里落花风".to_string()
+        );
+        let chapter = novel.process_chapter(chapter);
+        dbg!(&chapter.text);
+        assert!(chapter.text.starts_with("碧蓝的天空上飘着几朵积云"));
+        assert!(chapter.text.ends_with("宋游依旧坐着，看那群人走近。"));
     }
 
     #[test]
