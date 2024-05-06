@@ -1,27 +1,25 @@
 /// 小說狂人 <https://czbooks.net/>
 use super::{Book, Chapter, NovelError, Noveler};
-use aho_corasick::AhoCorasick;
+use regex::Regex;
 use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
+const PATTERNS: [(&str, &str); 2] = [("\u{3000}", ""), ("\n\n", "\n")];
+
 pub(crate) struct Czbooks {
-    replacer: (AhoCorasick, Vec<String>),
+    replacer: Vec<(Regex, &'static str)>,
 }
 
 impl Czbooks {
     pub(crate) fn new() -> Result<Self, NovelError> {
-        let patterns = ["\u{3000}", "\n\n"];
-        let replace_with = ["", "\n"]
-            .into_iter()
-            .map(std::string::ToString::to_string)
-            .collect();
+        let mut replacer = Vec::with_capacity(PATTERNS.len());
+        for (pat, s) in PATTERNS {
+            let regex = Regex::new(pat)?;
+            replacer.push((regex, s));
+        }
 
-        let ac = AhoCorasick::new(patterns)?;
-
-        Ok(Self {
-            replacer: (ac, replace_with),
-        })
+        Ok(Self { replacer })
     }
 }
 
@@ -61,12 +59,7 @@ impl Noveler for Czbooks {
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
         let selector = r"div.name";
-        let title = document
-            .find(selector)
-            .text()
-            .trim()
-            .replace("《射手凶猛》", "")
-            .to_string();
+        let title = document.find(selector).text().trim().to_string();
 
         let selector = r"div.content";
         let text = document.find(selector).text();
@@ -79,13 +72,13 @@ impl Noveler for Czbooks {
         Ok(None)
     }
 
-    fn process_chapter(&self, mut chapter: Chapter) -> Chapter {
-        chapter.text = self
-            .replacer
-            .0
-            .replace_all(&chapter.text, &self.replacer.1)
-            .to_string();
-        chapter
+    fn process_chapter(&self, chapter: Chapter) -> Chapter {
+        let mut text = chapter.text;
+        for (re, s) in &self.replacer {
+            text = re.replace_all(&text, *s).to_string();
+        }
+
+        Chapter { text, ..chapter }
     }
 }
 
@@ -140,7 +133,7 @@ mod tests {
         let novel = Czbooks::new().unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
         assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(chapter.title, "第1章 老地方".to_string());
+        assert_eq!(chapter.title, "《射手凶猛》第1章 老地方".to_string());
         let chapter = novel.process_chapter(chapter);
         dbg!(&chapter.text);
         assert!(chapter.text.starts_with("六月的首都日漸炎熱"));

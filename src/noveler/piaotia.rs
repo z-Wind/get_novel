@@ -5,29 +5,28 @@ use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
+const PATTERNS: [(&str, &str); 3] = [
+    ("(?s)（快捷键 .*", ""),
+    ("(?s).*返回书页", ""),
+    ("本站网站", ""),
+];
+
 pub(crate) struct Piaotia {
     base: Url,
-    replacer: (Vec<Regex>, Vec<String>),
+    replacer: Vec<(Regex, &'static str)>,
 }
 
 impl Piaotia {
     pub(crate) fn new(url: &str) -> Result<Self, NovelError> {
         let base = Url::parse(url)?;
 
-        let patterns = ["(?s)（快捷键 .*", "(?s).*返回书页", "本站网站"];
-        let replace_with = ["", "", ""]
-            .into_iter()
-            .map(std::string::ToString::to_string)
-            .collect();
-        let regexes = patterns
-            .into_iter()
-            .map(Regex::new)
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut replacer = Vec::with_capacity(PATTERNS.len());
+        for (pat, s) in PATTERNS {
+            let regex = Regex::new(pat)?;
+            replacer.push((regex, s));
+        }
 
-        Ok(Self {
-            base,
-            replacer: (regexes, replace_with),
-        })
+        Ok(Self { base, replacer })
     }
 }
 
@@ -86,8 +85,8 @@ impl Noveler for Piaotia {
 
     fn process_chapter(&self, chapter: Chapter) -> Chapter {
         let mut text = chapter.text;
-        for (re, s) in self.replacer.0.iter().zip(self.replacer.1.iter()) {
-            text = re.replace_all(&text, s).to_string();
+        for (re, s) in &self.replacer {
+            text = re.replace_all(&text, *s).to_string();
         }
 
         text = text

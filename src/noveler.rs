@@ -1,3 +1,10 @@
+mod czbooks;
+mod hjwzw;
+mod novel543;
+mod piaotia;
+mod qbtr;
+mod uukanshu;
+
 use reqwest::{Client, IntoUrl};
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -14,13 +21,6 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::task::JoinSet;
 use url::Url;
 use visdom::types::Elements;
-
-mod czbooks;
-mod hjwzw;
-mod novel543;
-mod piaotia;
-mod qbtr;
-mod uukanshu;
 
 pub(crate) use czbooks::Czbooks;
 pub(crate) use hjwzw::Hjwzw;
@@ -43,8 +43,6 @@ pub(crate) enum NovelError {
     StdIOError(#[from] io::Error),
     #[error("visdom fail {0}")]
     VisdomError(#[from] visdom::types::BoxDynError),
-    #[error("AhoCorasick fail {0}")]
-    AhoCorasickError(#[from] aho_corasick::BuildError),
     #[error("Regex fail {0}")]
     RegexError(#[from] regex::Error),
 }
@@ -331,13 +329,13 @@ mod tests {
         detector.guess_assess(None, true)
     }
 
-    #[ignore = "only for detecting coding"]
+    #[ignore = "Used for detecting coding"]
     #[tokio::test]
     async fn test_guess_coding() {
         dbg!(guess_coding("https://www.qbtr.cc/tongren/3655.html").await);
     }
 
-    #[ignore = "only for check coding"]
+    #[ignore = "Used for check coding"]
     #[tokio::test]
     async fn test_check_coding() {
         let client = reqwest::Client::new();
@@ -587,7 +585,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "online test"]
+    #[ignore = "Failed with Cloudflare"]
     #[tokio::test]
     async fn test_novel543() {
         let dir = TempDir::new("noveler_test_novel543").unwrap();
@@ -605,7 +603,6 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "online test"]
     #[tokio::test]
     async fn test_hjwzw() {
         let dir = TempDir::new("noveler_test_hjwzw").unwrap();
@@ -623,7 +620,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "online test"]
+    #[ignore = "Online Test"]
     #[tokio::test]
     async fn test_piaotia() {
         let dir = TempDir::new("noveler_test_piaotia").unwrap();
@@ -641,7 +638,6 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "online test"]
     #[tokio::test]
     async fn test_uukanshu() {
         let dir = TempDir::new("noveler_test_uukanshu").unwrap();
@@ -659,7 +655,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "only for compare"]
+    #[ignore = "Used for HTML parser benchmark comparison"]
     #[test]
     fn test_compare_parser() {
         let html = include_str!(concat!(

@@ -1,11 +1,15 @@
 /// 稷下書院 <https://www.novel543.com/>
 use super::{Book, Chapter, NovelError, Noveler};
+use regex::Regex;
 use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
+const PATTERNS: [(&str, &str); 0] = [];
+
 pub(crate) struct Novel543 {
     base: Url,
+    replacer: Vec<(Regex, &'static str)>,
 }
 
 impl Novel543 {
@@ -23,7 +27,13 @@ impl Novel543 {
 
         base.set_query(None);
 
-        Ok(Self { base })
+        let mut replacer = Vec::with_capacity(PATTERNS.len());
+        for (pat, s) in PATTERNS {
+            let regex = Regex::new(pat)?;
+            replacer.push((regex, s));
+        }
+
+        Ok(Self { base, replacer })
     }
 }
 
@@ -99,12 +109,17 @@ impl Noveler for Novel543 {
 
     fn process_chapter(&self, chapter: Chapter) -> Chapter {
         let mut text = chapter.text.trim().to_string();
+        for (re, s) in &self.replacer {
+            text = re.replace_all(&text, *s).to_string();
+        }
+
         text = text
             .split_inclusive('。')
             .map(|s| s.trim().replace('㱕', ""))
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
             .join("\n");
+
         Chapter { text, ..chapter }
     }
 }

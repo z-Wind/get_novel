@@ -5,9 +5,26 @@ use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
+const PATTERNS: [(&str, &str); 8] = [
+    (r"(?s)如果喜歡.*，請把網址發給您的朋友。.*", ""),
+    (r"(?s)如果喜欢.*，请把网址发给您的朋友。.*", ""),
+    (
+        r"[wｗ]{3}[．\.][ｕu][ｕu][ｋk][ａa][ｎn][ｓs][ｈh][ｕu][．\.][ｃc][ｏo][ｍm]",
+        "",
+    ),
+    (
+        r"[wｗ]{3}[．\.][ｕu][ｕu][ｋk][ａa][ｎn][ｓs][ｈh][ｕu][．\.][ｎn][ｅe][ｔt]",
+        "",
+    ),
+    (r"[ｕuＵU]{2}看书[ ]*", ""),
+    (r"[ｕuＵU]{2}看書[ ]*", ""),
+    (r"請記住本書首發域名：。：", ""),
+    (r"请记住本书首发域名：。：", ""),
+];
+
 pub(crate) struct UUkanshu {
     base: Url,
-    replacer: (Vec<Regex>, Vec<String>),
+    replacer: Vec<(Regex, &'static str)>,
 }
 
 impl UUkanshu {
@@ -24,29 +41,13 @@ impl UUkanshu {
         }
         base.set_query(None);
 
-        let patterns = [
-            r"(?s)如果喜歡.*，請把網址發給您的朋友。.*",
-            r"(?s)如果喜欢.*，请把网址发给您的朋友。.*",
-            r"[wｗ]{3}[．\.][ｕu][ｕu][ｋk][ａa][ｎn][ｓs][ｈh][ｕu][．\.][ｃc][ｏo][ｍm]",
-            r"[wｗ]{3}[．\.][ｕu][ｕu][ｋk][ａa][ｎn][ｓs][ｈh][ｕu][．\.][ｎn][ｅe][ｔt]",
-            r"[ｕuＵU]{2}看书[ ]*",
-            r"[ｕuＵU]{2}看書[ ]*",
-            r"請記住本書首發域名：。：",
-            r"请记住本书首发域名：。：",
-        ];
-        let replace_with = ["", "", "", "", "", "", ""]
-            .into_iter()
-            .map(std::string::ToString::to_string)
-            .collect();
-        let regexes = patterns
-            .into_iter()
-            .map(Regex::new)
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut replacer = Vec::with_capacity(PATTERNS.len());
+        for (pat, s) in PATTERNS {
+            let regex = Regex::new(pat)?;
+            replacer.push((regex, s));
+        }
 
-        Ok(Self {
-            base,
-            replacer: (regexes, replace_with),
-        })
+        Ok(Self { base, replacer })
     }
 }
 
@@ -103,8 +104,8 @@ impl Noveler for UUkanshu {
     fn process_chapter(&self, chapter: Chapter) -> Chapter {
         let mut text = chapter.text;
 
-        for (re, s) in self.replacer.0.iter().zip(self.replacer.1.iter()) {
-            text = re.replace_all(&text, s).to_string();
+        for (re, s) in &self.replacer {
+            text = re.replace_all(&text, *s).to_string();
         }
 
         text = text
