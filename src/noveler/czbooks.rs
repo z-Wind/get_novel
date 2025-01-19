@@ -90,9 +90,18 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/czbooks/contents.html"
     ));
+    static CONTENTS2: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/czbooks/contents2.html"
+    ));
+
     static CHAPTER: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/czbooks/chapter.html"
+    ));
+    static CHAPTER2: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/czbooks/chapter2.html"
     ));
 
     #[test]
@@ -106,6 +115,21 @@ mod tests {
             Book {
                 name: "射手凶猛".to_string(),
                 author: "初四兮".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_get_book_info2() {
+        let html = CONTENTS2;
+        let document = visdom::Vis::load(html).unwrap();
+        let novel = Czbooks::new().unwrap();
+        let book = novel.get_book_info(&document).unwrap();
+        assert_eq!(
+            book,
+            Book {
+                name: "這個世界過於危險".to_string(),
+                author: "十裡桃花".to_string()
             }
         );
     }
@@ -127,6 +151,22 @@ mod tests {
     }
 
     #[test]
+    fn test_get_chapter_urls_sorted2() {
+        let html = CONTENTS2;
+        let document = visdom::Vis::load(html).unwrap();
+        let novel = Czbooks::new().unwrap();
+        let urls = novel.get_chapter_urls_sorted(&document).unwrap();
+        assert_eq!(
+            urls.first().unwrap(),
+            &Url::parse("https://czbooks.net/n/uhemc/u7k9").unwrap()
+        );
+        assert_eq!(
+            urls.last().unwrap(),
+            &Url::parse("https://czbooks.net/n/uhemc/ud9fn").unwrap()
+        );
+    }
+
+    #[test]
     fn test_get_chapter_content() {
         let html = CHAPTER;
         let document = visdom::Vis::load(html).unwrap();
@@ -138,6 +178,25 @@ mod tests {
         dbg!(&chapter.text);
         assert!(chapter.text.starts_with("六月的首都日漸炎熱"));
         assert!(chapter.text.ends_with("“開個機子。”"));
+    }
+
+    #[test]
+    fn test_get_chapter_content2() {
+        let html = CHAPTER2;
+        let document = visdom::Vis::load(html).unwrap();
+        let novel = Czbooks::new().unwrap();
+        let chapter = novel.get_chapter(&document, "1").unwrap();
+        assert_eq!(chapter.order, "1".to_string());
+        assert_eq!(
+            chapter.title,
+            "《這個世界過於危險》第11章：暴食（上）".to_string()
+        );
+        let chapter = novel.process_chapter(chapter);
+        dbg!(&chapter.text);
+        assert!(chapter.text.starts_with("11月5日，周一。"));
+        assert!(chapter
+            .text
+            .ends_with("“你回來的正好，想吃漢堡了，你去幫我買吧！”"));
     }
 
     #[test]

@@ -14,15 +14,16 @@ unused_allocation
     clippy::similar_names,
     clippy::module_name_repetitions
 )]
+mod noveler;
 
 use clap::Parser;
-use noveler::{combine_txt, download_novel, Czbooks, Hjwzw, Novel543, Piaotia, Qbtr, UUkanshu};
 use reqwest::header;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
-mod noveler;
+use noveler::{combine_txt, download_novel, Czbooks, Hjwzw, Novel543, Piaotia, Qbtr, UUkanshu};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -62,6 +63,7 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
                 headers,
                 dir,
                 10,
+                Duration::from_millis(0),
             )
             .await
         }
@@ -72,6 +74,7 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
                 headers,
                 dir,
                 10,
+                Duration::from_millis(0),
             )
             .await
         }
@@ -82,6 +85,7 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
                 headers,
                 dir,
                 10,
+                Duration::from_millis(0),
             )
             .await
         }
@@ -91,7 +95,8 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
                 url_contents,
                 headers,
                 dir,
-                10,
+                1,
+                Duration::from_millis(1000),
             )
             .await
         }
@@ -102,6 +107,7 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
                 headers,
                 dir,
                 1,
+                Duration::from_millis(1000),
             )
             .await
         }
@@ -112,6 +118,7 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
                 headers,
                 dir,
                 10,
+                Duration::from_millis(0),
             )
             .await
         }

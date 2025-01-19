@@ -1,5 +1,3 @@
-use reqwest::header;
-
 mod czbooks;
 mod hjwzw;
 mod novel543;
@@ -7,6 +5,7 @@ mod piaotia;
 mod qbtr;
 mod uukanshu;
 
+use reqwest::header;
 use reqwest::{Client, IntoUrl};
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -171,6 +170,7 @@ pub(crate) async fn download_novel(
     headers: Option<header::HeaderMap>,
     dir: &Path,
     limit: usize,
+    interval: Duration,
 ) -> Result<PathBuf, NovelError> {
     let mut client = Client::builder()
         .user_agent(USER_AGENT)
@@ -223,6 +223,7 @@ pub(crate) async fn download_novel(
 
                     async move {
                         println!("{:>10} => {order:<8}: {url}", "Process");
+                        tokio::time::sleep(interval).await;
                         let (chapter, next_page) = match noveler.process_url(client, &order, url.clone()).await {
                             Ok(result) => result,
                             Err(NovelError::ReqwestError(e)) => {
@@ -484,9 +485,16 @@ mod tests {
         let fake = FakeNoveler::new(url.clone());
         let dir = TempDir::new("noveler_test_basic_noveler").unwrap();
         let path = dir.path();
-        let chapter_dir = download_novel(Arc::new(fake), url.as_str(), None, path, 5)
-            .await
-            .unwrap();
+        let chapter_dir = download_novel(
+            Arc::new(fake),
+            url.as_str(),
+            None,
+            path,
+            5,
+            Duration::from_millis(0),
+        )
+        .await
+        .unwrap();
 
         assert!(path.join("temp/FakeNoveler/author_name/00001.txt").exists());
         assert!(path
@@ -617,9 +625,16 @@ text_process_00010_n
                 .expect("create header value cf_clearance ok"),
         )]);
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 10)
-            .await
-            .expect("download ok");
+        let chapter_dir = download_novel(
+            Arc::new(noveler),
+            url,
+            Some(headers),
+            path,
+            1,
+            Duration::from_millis(1000),
+        )
+        .await
+        .expect("download ok");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -635,9 +650,16 @@ text_process_00010_n
         let url = "https://tw.hjwzw.com/Book/Chapter/48386";
         let noveler = Hjwzw::new(url).expect("create Hjwzw ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
-            .await
-            .expect("download ok");
+        let chapter_dir = download_novel(
+            Arc::new(noveler),
+            url,
+            None,
+            path,
+            10,
+            Duration::from_millis(0),
+        )
+        .await
+        .expect("download ok");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -653,9 +675,16 @@ text_process_00010_n
         let url = "https://www.novel543.com/0413188175/dir";
         let noveler = Novel543::new(url).expect("create Novel543 ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 1)
-            .await
-            .expect("download ok");
+        let chapter_dir = download_novel(
+            Arc::new(noveler),
+            url,
+            None,
+            path,
+            1,
+            Duration::from_millis(0),
+        )
+        .await
+        .expect("download ok");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -671,9 +700,16 @@ text_process_00010_n
         let url = "https://www.piaotia.com/html/14/14881/";
         let noveler = Piaotia::new(url).expect("create Piaotia ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
-            .await
-            .expect("download ok");
+        let chapter_dir = download_novel(
+            Arc::new(noveler),
+            url,
+            None,
+            path,
+            10,
+            Duration::from_millis(0),
+        )
+        .await
+        .expect("download ok");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -689,9 +725,16 @@ text_process_00010_n
         let url = "https://www.qbtr.cc/tongren/3655.html";
         let noveler = Qbtr::new(url).expect("create Qbtr ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
-            .await
-            .expect("download ok");
+        let chapter_dir = download_novel(
+            Arc::new(noveler),
+            url,
+            None,
+            path,
+            10,
+            Duration::from_millis(0),
+        )
+        .await
+        .expect("download ok");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -707,9 +750,16 @@ text_process_00010_n
         let url = "https://uukanshu.cc/book/20692/";
         let noveler: UUkanshu = UUkanshu::new(url).expect("create UUkanshu ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
-            .await
-            .expect("download ok");
+        let chapter_dir = download_novel(
+            Arc::new(noveler),
+            url,
+            None,
+            path,
+            10,
+            Duration::from_millis(0),
+        )
+        .await
+        .expect("download ok");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
