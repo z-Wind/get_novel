@@ -626,6 +626,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
+    #[ignore = "Online Test"]
     #[tokio::test]
     async fn test_hjwzw() {
         let dir = TempDir::new("noveler_test_hjwzw").unwrap();
@@ -643,7 +644,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "Online Test with env cf_clearance for Cloudflare"]
+    #[ignore = "Online Test"]
     #[tokio::test]
     async fn test_novel543() {
         let dir = TempDir::new("noveler_test_novel543").unwrap();
@@ -652,16 +653,7 @@ text_process_00010_n
         let url = "https://www.novel543.com/0413188175/dir";
         let noveler = Novel543::new(url).expect("create Novel543 ok");
 
-        #[allow(clippy::option_env_unwrap)]
-        let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
-
-        let headers = header::HeaderMap::from_iter([(
-            header::COOKIE,
-            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
-                .expect("create header value cf_clearance ok"),
-        )]);
-
-        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 1)
+        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 1)
             .await
             .expect("download ok");
 
@@ -670,6 +662,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
+    #[ignore = "Online Test"]
     #[tokio::test]
     async fn test_piaotia() {
         let dir = TempDir::new("noveler_test_piaotia").unwrap();
@@ -687,6 +680,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
+    #[ignore = "Online Test"]
     #[tokio::test]
     async fn test_qbtr() {
         let dir = TempDir::new("noveler_test_qbtr").unwrap();
@@ -704,6 +698,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
+    #[ignore = "Online Test"]
     #[tokio::test]
     async fn test_uukanshu() {
         let dir = TempDir::new("noveler_test_uukanshu").unwrap();
