@@ -35,4 +35,4 @@ To build with two ways
 - [稷下書院](https://www.novel543.com/)
 - [飄天文學](https://www.ptwxz.com/)
 - [全本同人](https://www.qbtr.cc/)
-- [UU看書網](https://www.uukanshu.com/)
+- [UU看書](https://uukanshu.cc/)

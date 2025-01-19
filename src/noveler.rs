@@ -601,13 +601,14 @@ text_process_00010_n
 
     #[ignore = "Online Test with env cf_clearance for Cloudflare"]
     #[tokio::test]
-    async fn test_novel543() {
-        let dir = TempDir::new("noveler_test_novel543").unwrap();
+    async fn test_czbooks() {
+        let dir = TempDir::new("noveler_test_czbooks").unwrap();
         let path = dir.path();
 
-        let url = "https://www.novel543.com/0413188175/dir";
-        let noveler = Novel543::new(url).expect("create Novel543 ok");
+        let url = "https://czbooks.net/n/uhemc";
+        let noveler: Czbooks = Czbooks::new().expect("create Czbooks ok");
 
+        #[allow(clippy::option_env_unwrap)]
         let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
 
         let headers = header::HeaderMap::from_iter([(
@@ -616,7 +617,7 @@ text_process_00010_n
                 .expect("create header value cf_clearance ok"),
         )]);
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 1)
+        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 10)
             .await
             .expect("download ok");
 
@@ -634,6 +635,33 @@ text_process_00010_n
         let noveler = Hjwzw::new(url).expect("create Hjwzw ok");
 
         let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
+            .await
+            .expect("download ok");
+
+        combine_txt(&chapter_dir).expect("combine txt ok");
+
+        dir.close().unwrap();
+    }
+
+    #[ignore = "Online Test with env cf_clearance for Cloudflare"]
+    #[tokio::test]
+    async fn test_novel543() {
+        let dir = TempDir::new("noveler_test_novel543").unwrap();
+        let path = dir.path();
+
+        let url = "https://www.novel543.com/0413188175/dir";
+        let noveler = Novel543::new(url).expect("create Novel543 ok");
+
+        #[allow(clippy::option_env_unwrap)]
+        let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
+
+        let headers = header::HeaderMap::from_iter([(
+            header::COOKIE,
+            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
+                .expect("create header value cf_clearance ok"),
+        )]);
+
+        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 1)
             .await
             .expect("download ok");
 
@@ -660,12 +688,12 @@ text_process_00010_n
     }
 
     #[tokio::test]
-    async fn test_uukanshu() {
-        let dir = TempDir::new("noveler_test_uukanshu").unwrap();
+    async fn test_qbtr() {
+        let dir = TempDir::new("noveler_test_qbtr").unwrap();
         let path = dir.path();
 
-        let url = "https://uukanshu.cc/book/8530/";
-        let noveler: UUkanshu = UUkanshu::new(url).expect("create UUkanshu ok");
+        let url = "https://www.qbtr.cc/tongren/3655.html";
+        let noveler = Qbtr::new(url).expect("create Qbtr ok");
 
         let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
             .await
@@ -676,24 +704,15 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "Online Test with env cf_clearance for Cloudflare"]
     #[tokio::test]
-    async fn test_czbooks() {
-        let dir = TempDir::new("noveler_test_czbooks").unwrap();
+    async fn test_uukanshu() {
+        let dir = TempDir::new("noveler_test_uukanshu").unwrap();
         let path = dir.path();
 
-        let url = "https://czbooks.net/n/uhemc";
-        let noveler: Czbooks = Czbooks::new().expect("create Czbooks ok");
+        let url = "https://uukanshu.cc/book/20692/";
+        let noveler: UUkanshu = UUkanshu::new(url).expect("create UUkanshu ok");
 
-        let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
-
-        let headers = header::HeaderMap::from_iter([(
-            header::COOKIE,
-            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
-                .expect("create header value cf_clearance ok"),
-        )]);
-
-        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 10)
+        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
             .await
             .expect("download ok");
 

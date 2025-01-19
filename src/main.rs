@@ -75,12 +75,7 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
             )
             .await
         }
-        _ if url_contents.starts_with("https://tw.uukanshu.com/")
-            || url_contents.starts_with("https://tw.uukanshu.net/")
-            || url_contents.starts_with("https://www.uukanshu.com/")
-            || url_contents.starts_with("https://www.uukanshu.net/")
-            || url_contents.starts_with("https://uukanshu.cc/") =>
-        {
+        _ if url_contents.starts_with("https://uukanshu.cc/") => {
             download_novel(
                 Arc::new(UUkanshu::new(url_contents).expect("create UUkanshu ok")),
                 url_contents,
