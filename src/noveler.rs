@@ -1,3 +1,5 @@
+use reqwest::header;
+
 mod czbooks;
 mod hjwzw;
 mod novel543;
@@ -28,6 +30,8 @@ pub(crate) use novel543::Novel543;
 pub(crate) use piaotia::Piaotia;
 pub(crate) use qbtr::Qbtr;
 pub(crate) use uukanshu::UUkanshu;
+
+const USER_AGENT:&str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
 
 #[derive(Error, Debug)]
 pub(crate) enum NovelError {
@@ -164,16 +168,23 @@ async fn process_save_task(
 pub(crate) async fn download_novel(
     noveler: Arc<impl Noveler>,
     url_contents: &str,
+    headers: Option<header::HeaderMap>,
     dir: &Path,
     limit: usize,
 ) -> Result<PathBuf, NovelError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60 * 3))
-        .build()?;
+    let mut client = Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(Duration::from_secs(60 * 3));
+
+    if let Some(headers) = headers {
+        client = client.default_headers(headers).cookie_store(true);
+    }
+    let client = client.build()?;
 
     let document =
         get_html_and_fix_encoding(client.clone(), url_contents, noveler.need_encoding()).await?;
-    // fs::write("test.html", document.html()).unwrap();
+    // fs::write("test.html", document).unwrap();
+    // panic!();
     let document = visdom::Vis::load(document)?;
 
     let book = noveler.get_book_info(&document)?;
@@ -314,7 +325,10 @@ mod tests {
     use super::*;
     use chardetng::EncodingDetector;
     use regex::Regex;
-    use std::sync::atomic::{AtomicI32, Ordering};
+    use std::{
+        env,
+        sync::atomic::{AtomicI32, Ordering},
+    };
     use tempdir::TempDir;
 
     async fn guess_coding<T: IntoUrl>(url: T) -> (&'static encoding_rs::Encoding, bool) {
@@ -470,7 +484,7 @@ mod tests {
         let fake = FakeNoveler::new(url.clone());
         let dir = TempDir::new("noveler_test_basic_noveler").unwrap();
         let path = dir.path();
-        let chapter_dir = download_novel(Arc::new(fake), url.as_str(), path, 5)
+        let chapter_dir = download_novel(Arc::new(fake), url.as_str(), None, path, 5)
             .await
             .unwrap();
 
@@ -585,7 +599,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "Failed with Cloudflare"]
+    #[ignore = "Online Test with env cf_clearance for Cloudflare"]
     #[tokio::test]
     async fn test_novel543() {
         let dir = TempDir::new("noveler_test_novel543").unwrap();
@@ -594,7 +608,15 @@ text_process_00010_n
         let url = "https://www.novel543.com/0413188175/dir";
         let noveler = Novel543::new(url).expect("create Novel543 ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, path, 1)
+        let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
+
+        let headers = header::HeaderMap::from_iter([(
+            header::COOKIE,
+            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
+                .expect("create header value cf_clearance ok"),
+        )]);
+
+        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 1)
             .await
             .expect("download ok");
 
@@ -611,7 +633,7 @@ text_process_00010_n
         let url = "https://tw.hjwzw.com/Book/Chapter/48386";
         let noveler = Hjwzw::new(url).expect("create Hjwzw ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, path, 10)
+        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
             .await
             .expect("download ok");
 
@@ -620,7 +642,6 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "Online Test"]
     #[tokio::test]
     async fn test_piaotia() {
         let dir = TempDir::new("noveler_test_piaotia").unwrap();
@@ -629,7 +650,7 @@ text_process_00010_n
         let url = "https://www.piaotia.com/html/14/14881/";
         let noveler = Piaotia::new(url).expect("create Piaotia ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, path, 10)
+        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
             .await
             .expect("download ok");
 
@@ -643,10 +664,36 @@ text_process_00010_n
         let dir = TempDir::new("noveler_test_uukanshu").unwrap();
         let path = dir.path();
 
-        let url = "https://tw.uukanshu.com/b/239329/";
+        let url = "https://uukanshu.cc/book/8530/";
         let noveler: UUkanshu = UUkanshu::new(url).expect("create UUkanshu ok");
 
-        let chapter_dir = download_novel(Arc::new(noveler), url, path, 10)
+        let chapter_dir = download_novel(Arc::new(noveler), url, None, path, 10)
+            .await
+            .expect("download ok");
+
+        combine_txt(&chapter_dir).expect("combine txt ok");
+
+        dir.close().unwrap();
+    }
+
+    #[ignore = "Online Test with env cf_clearance for Cloudflare"]
+    #[tokio::test]
+    async fn test_czbooks() {
+        let dir = TempDir::new("noveler_test_czbooks").unwrap();
+        let path = dir.path();
+
+        let url = "https://czbooks.net/n/uhemc";
+        let noveler: Czbooks = Czbooks::new().expect("create Czbooks ok");
+
+        let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
+
+        let headers = header::HeaderMap::from_iter([(
+            header::COOKIE,
+            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
+                .expect("create header value cf_clearance ok"),
+        )]);
+
+        let chapter_dir = download_novel(Arc::new(noveler), url, Some(headers), path, 10)
             .await
             .expect("download ok");
 

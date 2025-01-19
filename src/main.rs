@@ -17,6 +17,7 @@ unused_allocation
 
 use clap::Parser;
 use noveler::{combine_txt, download_novel, Czbooks, Hjwzw, Novel543, Piaotia, Qbtr, UUkanshu};
+use reqwest::header;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -29,6 +30,9 @@ struct Args {
     /// 小說目錄網址
     #[arg(short, long, required = true)]
     url_contents: String,
+    /// Cloudflare 認證 cookies，需先從瀏覽器取得
+    #[arg(short, long)]
+    cf_clearance: Option<String>,
 }
 
 #[tokio::main]
@@ -37,16 +41,25 @@ async fn main() {
     let dir = env::current_exe().expect("find exe path");
     let dir = dir.parent().expect("have parent dir");
 
-    let chapter_dir = get_novel(&args.url_contents, dir).await;
+    let headers = args.cf_clearance.map(|cf_clearance| {
+        header::HeaderMap::from_iter([(
+            header::COOKIE,
+            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
+                .expect("create header value cf_clearance ok"),
+        )])
+    });
+
+    let chapter_dir = get_novel(&args.url_contents, headers, dir).await;
     combine_txt(&chapter_dir).expect("combine txt ok");
 }
 
-async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
+async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: &Path) -> PathBuf {
     let result = match url_contents {
         _ if url_contents.starts_with("https://tw.hjwzw.com/") => {
             download_novel(
                 Arc::new(Hjwzw::new(url_contents).expect("create Hjwzw ok")),
                 url_contents,
+                headers,
                 dir,
                 10,
             )
@@ -56,6 +69,7 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
             download_novel(
                 Arc::new(Piaotia::new(url_contents).expect("create Piaotia ok")),
                 url_contents,
+                headers,
                 dir,
                 10,
             )
@@ -64,11 +78,13 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
         _ if url_contents.starts_with("https://tw.uukanshu.com/")
             || url_contents.starts_with("https://tw.uukanshu.net/")
             || url_contents.starts_with("https://www.uukanshu.com/")
-            || url_contents.starts_with("https://www.uukanshu.net/") =>
+            || url_contents.starts_with("https://www.uukanshu.net/")
+            || url_contents.starts_with("https://uukanshu.cc/") =>
         {
             download_novel(
                 Arc::new(UUkanshu::new(url_contents).expect("create UUkanshu ok")),
                 url_contents,
+                headers,
                 dir,
                 10,
             )
@@ -78,6 +94,7 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
             download_novel(
                 Arc::new(Czbooks::new().expect("create Czbooks ok")),
                 url_contents,
+                headers,
                 dir,
                 10,
             )
@@ -87,6 +104,7 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
             download_novel(
                 Arc::new(Novel543::new(url_contents).expect("create Novel543 ok")),
                 url_contents,
+                headers,
                 dir,
                 1,
             )
@@ -96,6 +114,7 @@ async fn get_novel(url_contents: &str, dir: &Path) -> PathBuf {
             download_novel(
                 Arc::new(Qbtr::new(url_contents).expect("create Qbtr ok")),
                 url_contents,
+                headers,
                 dir,
                 10,
             )
