@@ -73,8 +73,8 @@ async fn get_novel(url_contents: &str, headers: Option<header::HeaderMap>, dir: 
                 url_contents,
                 headers,
                 dir,
-                10,
-                Duration::from_millis(0),
+                1,
+                Duration::from_millis(1000),
             )
             .await
         }
