@@ -17,9 +17,9 @@ chardetng = "0.1"
 visdom = { version = "1.0", features = ["destroy"] }
 
 [dev-dependencies]
-mockito = "1.6"
+mockito = "1.7"
 tempdir = "0.3"
 nipper = "0.1"
-scraper = "0.22"
+scraper = "0.23"
 accessibility-scraper = "0.0"
 crabquery = "0.1"

@@ -30,7 +30,9 @@ pub(crate) use piaotia::Piaotia;
 pub(crate) use qbtr::Qbtr;
 pub(crate) use uukanshu::UUkanshu;
 
-const USER_AGENT:&str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+const USER_AGENT_WINDOWS:&str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36";
+const USER_AGENT_LINUX:&str="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
+const USER_AGENT_MAC:&str="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36";
 
 #[derive(Error, Debug)]
 pub(crate) enum NovelError {
@@ -172,8 +174,15 @@ pub(crate) async fn download_novel(
     limit: usize,
     interval: Duration,
 ) -> Result<PathBuf, NovelError> {
+    let user_agent = match std::env::consts::OS {
+        "macos" => USER_AGENT_MAC,
+        "windows" => USER_AGENT_WINDOWS,
+        "linux" => USER_AGENT_LINUX,
+        _ => USER_AGENT_WINDOWS,
+    };
+
     let mut client = Client::builder()
-        .user_agent(USER_AGENT)
+        .user_agent(user_agent)
         .timeout(Duration::from_secs(60 * 3));
 
     if let Some(headers) = headers {
@@ -636,6 +645,8 @@ text_process_00010_n
         .await
         .expect("download ok");
 
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+
         combine_txt(&chapter_dir).expect("combine txt ok");
 
         dir.close().unwrap();
@@ -660,6 +671,8 @@ text_process_00010_n
         )
         .await
         .expect("download ok");
+
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -686,6 +699,8 @@ text_process_00010_n
         .await
         .expect("download ok");
 
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+
         combine_txt(&chapter_dir).expect("combine txt ok");
 
         dir.close().unwrap();
@@ -710,6 +725,8 @@ text_process_00010_n
         )
         .await
         .expect("download ok");
+
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -736,12 +753,14 @@ text_process_00010_n
         .await
         .expect("download ok");
 
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+
         combine_txt(&chapter_dir).expect("combine txt ok");
 
         dir.close().unwrap();
     }
 
-    #[ignore = "Online Test"]
+    #[ignore = "Online Test with env cf_clearance for Cloudflare"]
     #[tokio::test]
     async fn test_uukanshu() {
         let dir = TempDir::new("noveler_test_uukanshu").unwrap();
@@ -750,16 +769,27 @@ text_process_00010_n
         let url = "https://uukanshu.cc/book/20692/";
         let noveler: UUkanshu = UUkanshu::new(url).expect("create UUkanshu ok");
 
+        #[allow(clippy::option_env_unwrap)]
+        let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
+
+        let headers = header::HeaderMap::from_iter([(
+            header::COOKIE,
+            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
+                .expect("create header value cf_clearance ok"),
+        )]);
+
         let chapter_dir = download_novel(
             Arc::new(noveler),
             url,
-            None,
+            Some(headers),
             path,
             10,
             Duration::from_millis(0),
         )
         .await
         .expect("download ok");
+
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
