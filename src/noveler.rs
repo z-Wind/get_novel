@@ -176,7 +176,6 @@ pub(crate) async fn download_novel(
 ) -> Result<PathBuf, NovelError> {
     let user_agent = match std::env::consts::OS {
         "macos" => USER_AGENT_MAC,
-        "windows" => USER_AGENT_WINDOWS,
         "linux" => USER_AGENT_LINUX,
         _ => USER_AGENT_WINDOWS,
     };
@@ -294,7 +293,7 @@ pub(crate) fn combine_txt(dir: &Path) -> Result<(), NovelError> {
         write!(&mut output, "\n\n")?;
 
         if let Some(file_name) = path.file_name() {
-            println!("Appended content of file: {file_name:?}");
+            println!("Appended content of file: {}", file_name.display());
         }
     }
 
@@ -645,7 +644,7 @@ text_process_00010_n
         .await
         .expect("download ok");
 
-        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {chapter_dir:?}");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -672,7 +671,7 @@ text_process_00010_n
         .await
         .expect("download ok");
 
-        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {chapter_dir:?}");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -699,7 +698,7 @@ text_process_00010_n
         .await
         .expect("download ok");
 
-        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {chapter_dir:?}");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -726,7 +725,7 @@ text_process_00010_n
         .await
         .expect("download ok");
 
-        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {chapter_dir:?}");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -753,7 +752,7 @@ text_process_00010_n
         .await
         .expect("download ok");
 
-        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {chapter_dir:?}");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
@@ -789,7 +788,7 @@ text_process_00010_n
         .await
         .expect("download ok");
 
-        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {:?}", chapter_dir);
+        assert!(chapter_dir.ends_with("射手兇猛"), "dir = {chapter_dir:?}");
 
         combine_txt(&chapter_dir).expect("combine txt ok");
 
