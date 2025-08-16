@@ -1,4 +1,4 @@
-/// UU看書 <https://www.uukanshu.com/>
+/// UU看書 <https://uukanshu.cc/>
 use super::{Book, Chapter, NovelError, Noveler};
 use regex::Regex;
 use std::fmt::{self, Display};

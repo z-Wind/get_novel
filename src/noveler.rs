@@ -196,6 +196,7 @@ pub(crate) async fn download_novel(
     let document = visdom::Vis::load(document)?;
 
     let book = noveler.get_book_info(&document)?;
+    println!("{book}");
 
     let dir = dir
         .join("temp")
@@ -615,7 +616,7 @@ text_process_00010_n
         dir.close().unwrap();
     }
 
-    #[ignore = "Online Test with env cf_clearance for Cloudflare"]
+    #[ignore = "Online Test sometimes with env cf_clearance for Cloudflare"]
     #[tokio::test]
     async fn test_czbooks() {
         let dir = TempDir::new("noveler_test_czbooks").unwrap();
@@ -624,19 +625,21 @@ text_process_00010_n
         let url = "https://czbooks.net/n/uhemc";
         let noveler: Czbooks = Czbooks::new().expect("create Czbooks ok");
 
-        #[allow(clippy::option_env_unwrap)]
-        let cf_clearance = option_env!("cf_clearance").expect("env cf_clearance");
-
-        let headers = header::HeaderMap::from_iter([(
-            header::COOKIE,
-            header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
-                .expect("create header value cf_clearance ok"),
-        )]);
+        let headers = if let Some(cf_clearance) = option_env!("cf_clearance") {
+            let headers = header::HeaderMap::from_iter([(
+                header::COOKIE,
+                header::HeaderValue::from_str(&format!("cf_clearance={cf_clearance}"))
+                    .expect("create header value cf_clearance ok"),
+            )]);
+            Some(headers)
+        } else {
+            None
+        };
 
         let chapter_dir = download_novel(
             Arc::new(noveler),
             url,
-            Some(headers),
+            headers,
             path,
             1,
             Duration::from_millis(1000),
@@ -665,8 +668,8 @@ text_process_00010_n
             url,
             None,
             path,
-            10,
-            Duration::from_millis(0),
+            1,
+            Duration::from_millis(1000),
         )
         .await
         .expect("download ok");
@@ -693,7 +696,7 @@ text_process_00010_n
             None,
             path,
             1,
-            Duration::from_millis(0),
+            Duration::from_millis(1000),
         )
         .await
         .expect("download ok");
@@ -719,8 +722,8 @@ text_process_00010_n
             url,
             None,
             path,
-            10,
-            Duration::from_millis(0),
+            1,
+            Duration::from_millis(1000),
         )
         .await
         .expect("download ok");
@@ -746,8 +749,8 @@ text_process_00010_n
             url,
             None,
             path,
-            10,
-            Duration::from_millis(0),
+            1,
+            Duration::from_millis(1000),
         )
         .await
         .expect("download ok");
@@ -782,8 +785,8 @@ text_process_00010_n
             url,
             Some(headers),
             path,
-            10,
-            Duration::from_millis(0),
+            1,
+            Duration::from_millis(1000),
         )
         .await
         .expect("download ok");
