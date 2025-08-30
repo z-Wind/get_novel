@@ -50,6 +50,8 @@ pub(crate) enum NovelError {
     VisdomError(#[from] visdom::types::BoxDynError),
     #[error("Regex fail {0}")]
     RegexError(#[from] regex::Error),
+    #[error("No {0}, may be blocked by Cloudflare")]
+    BlockedByCloudflare(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -196,6 +198,9 @@ pub(crate) async fn download_novel(
     let document = visdom::Vis::load(document)?;
 
     let book = noveler.get_book_info(&document)?;
+    if book.author.is_empty() && book.name.is_empty() {
+        return Err(NovelError::BlockedByCloudflare("Book Info".to_string()));
+    }
     println!("{book}");
 
     let dir = dir

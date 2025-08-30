@@ -70,11 +70,17 @@ impl Noveler for Hjwzw {
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
         let selector = r"table:nth-of-type(7) h1";
         let title = document.find(selector).text().trim().to_string();
+        if title.is_empty() {
+            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+        }
 
         let doc = document.cloned();
         doc.find("div#Pan_Ad1").remove();
         let selector = r"table:nth-of-type(7) div:nth-of-type(4)";
         let text: String = doc.find(selector).text();
+        if text.is_empty() {
+            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+        }
 
         let order = order.to_string();
         Ok(Chapter { order, title, text })

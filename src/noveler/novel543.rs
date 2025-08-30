@@ -70,9 +70,15 @@ impl Noveler for Novel543 {
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
         let selector = r"#chapterWarp > div.chapter-content.px-3 > h1";
         let title = document.find(selector).text().trim().to_string();
+        if title.is_empty() {
+            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+        }
 
         let selector = r"#chapterWarp > div.chapter-content.px-3 > div";
         let text: String = document.find(selector).text();
+        if text.is_empty() {
+            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+        }
 
         let order = order.to_string();
         Ok(Chapter { order, title, text })

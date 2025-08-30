@@ -60,9 +60,15 @@ impl Noveler for Czbooks {
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
         let selector = r"div.name";
         let title = document.find(selector).text().trim().to_string();
+        if title.is_empty() {
+            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+        }
 
         let selector = r"div.content";
         let text = document.find(selector).text();
+        if text.is_empty() {
+            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+        }
 
         let order = order.to_string();
         Ok(Chapter { order, title, text })
