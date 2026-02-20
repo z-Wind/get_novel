@@ -35,10 +35,9 @@ impl UUkanshu {
             Ok(mut path) => {
                 path.clear();
             }
-            Err(()) => {
-                return Err(NovelError::CannotBeABase(url.to_string()));
-            }
+            Err(()) => return Err(NovelError::CannotBeABase(url.to_string())),
         }
+
         base.set_query(None);
 
         let mut replacer = Vec::with_capacity(PATTERNS.len());
@@ -59,18 +58,14 @@ impl Display for UUkanshu {
 
 impl Noveler for UUkanshu {
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
-        let selector = r"div.bookinfo > h1.booktitle";
-        let name = document.find(selector).text();
-
-        let selector = r"div.bookinfo > p.booktag > a";
-        let author = document.find(selector).text();
+        let name = document.find(r"div.bookinfo > h1.booktitle").text();
+        let author = document.find(r"div.bookinfo > p.booktag > a").text();
         Ok(Book { name, author })
     }
 
     fn get_chapter_urls_sorted(&self, document: &Elements) -> Result<Vec<Url>, NovelError> {
-        let selector = r"div#list-chapterAll a";
-        let urls = document
-            .find(selector)
+        document
+            .find(r"div#list-chapterAll a")
             .into_iter()
             .map(|x| {
                 x.get_attribute("href")
@@ -78,25 +73,25 @@ impl Noveler for UUkanshu {
                     .ok_or(NovelError::NotFound("href".to_string()))
             })
             .map(|x| x.and_then(|url_str| self.base.join(&url_str).map_err(NovelError::ParseError)))
-            .collect::<Result<Vec<Url>, NovelError>>()?;
-        Ok(urls.into_iter().collect())
+            .collect()
     }
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
-        let selector = r"div.book.read h1";
-        let title = document.find(selector).text().trim().to_string();
+        let title = document.find(r"div.book.read h1").text().trim().to_string();
         if title.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Title".to_string()));
         }
 
-        let selector = r"div.readcotent";
-        let text: String = document.find(selector).text();
+        let text = document.find(r"div.readcotent").text();
         if text.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Text".to_string()));
         }
 
-        let order = order.to_string();
-        Ok(Chapter { order, title, text })
+        Ok(Chapter {
+            order: order.to_string(),
+            title,
+            text,
+        })
     }
 
     fn get_next_page(&self, _document: &Elements) -> Result<Option<Url>, NovelError> {
@@ -110,12 +105,15 @@ impl Noveler for UUkanshu {
             text = re.replace_all(&text, *s).to_string();
         }
 
+        // 先按換行與全形空白切分
         text = text
             .split(['\n', '\u{3000}', '\u{a0}', '\r'])
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect::<Vec<&str>>()
             .join("\n");
+
+        // 再按半形雙空格切分（部分廣告文字用雙空格分隔）
         text = text
             .split("  ")
             .map(str::trim)
@@ -142,8 +140,7 @@ mod tests {
 
     #[test]
     fn test_get_book_info() {
-        let html = CONTENTS;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS).unwrap();
         let novel = UUkanshu::new("https://uukanshu.cc/book/20692/").unwrap();
         let book = novel.get_book_info(&document).unwrap();
         assert_eq!(
@@ -157,8 +154,7 @@ mod tests {
 
     #[test]
     fn test_get_chapter_urls_sorted() {
-        let html = CONTENTS;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS).unwrap();
         let novel = UUkanshu::new("https://uukanshu.cc/book/20692/").unwrap();
         let urls = novel.get_chapter_urls_sorted(&document).unwrap();
         assert_eq!(
@@ -173,25 +169,21 @@ mod tests {
 
     #[test]
     fn test_get_chapter_content() {
-        let html = CHAPTER;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CHAPTER).unwrap();
         let novel = UUkanshu::new("https://uukanshu.cc/book/20692/").unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(chapter.title, "第一章 老地方".to_string());
+        assert_eq!(chapter.order, "1");
+        assert_eq!(chapter.title, "第一章 老地方");
         assert!(!chapter.text.is_empty());
         let chapter = novel.process_chapter(chapter);
-        dbg!(&chapter.text);
         assert!(chapter.text.starts_with("六月的首都日漸炎熱。"));
         assert!(chapter.text.ends_with("「開個機子。」"));
     }
 
     #[test]
     fn test_get_next_page() {
-        let html = CHAPTER;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CHAPTER).unwrap();
         let novel = UUkanshu::new("https://uukanshu.cc/book/20692/").unwrap();
-        let url = novel.get_next_page(&document).unwrap();
-        assert_eq!(url, None);
+        assert_eq!(novel.get_next_page(&document).unwrap(), None);
     }
 }

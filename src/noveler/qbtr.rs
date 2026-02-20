@@ -1,15 +1,11 @@
 /// 全本同人 <https://www.qbtr.cc/>
 use super::{Book, Chapter, NovelError, Noveler};
-use regex::Regex;
 use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
-const PATTERNS: [(&str, &str); 0] = [];
-
 pub(crate) struct Qbtr {
     base: Url,
-    replacer: Vec<(Regex, &'static str)>,
 }
 
 impl Qbtr {
@@ -20,20 +16,11 @@ impl Qbtr {
             Ok(mut path) => {
                 path.clear();
             }
-            Err(()) => {
-                return Err(NovelError::CannotBeABase(url.to_string()));
-            }
+            Err(()) => return Err(NovelError::CannotBeABase(url.to_string())),
         }
 
         base.set_query(None);
-
-        let mut replacer = Vec::with_capacity(PATTERNS.len());
-        for (pat, s) in PATTERNS {
-            let regex = Regex::new(pat)?;
-            replacer.push((regex, s));
-        }
-
-        Ok(Self { base, replacer })
+        Ok(Self { base })
     }
 }
 
@@ -49,18 +36,17 @@ impl Noveler for Qbtr {
     }
 
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
-        let selector = r"div.infos > h1";
-        let name = document.find(selector).text();
-
-        let selector = r"div.date > span";
-        let author = document.find(selector).text().replace("作者：", "");
+        let name = document.find(r"div.infos > h1").text();
+        let author = document
+            .find(r"div.date > span")
+            .text()
+            .replace("作者：", "");
         Ok(Book { name, author })
     }
 
     fn get_chapter_urls_sorted(&self, document: &Elements) -> Result<Vec<Url>, NovelError> {
-        let selector = r"div.book_list.clearfix > ul > li > a";
         document
-            .find(selector)
+            .find(r"div.book_list.clearfix > ul > li > a")
             .into_iter()
             .map(|x| {
                 x.get_attribute("href")
@@ -72,15 +58,17 @@ impl Noveler for Qbtr {
     }
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
-        let selector = r"div.read_chapterName.tc > h1";
-        let title = document.find(selector).text().trim().to_string();
+        let title = document
+            .find(r"div.read_chapterName.tc > h1")
+            .text()
+            .trim()
+            .to_string();
         if title.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Title".to_string()));
         }
 
-        let selector = r"div.read_chapterDetail > p";
         let text: String = document
-            .find(selector)
+            .find(r"div.read_chapterDetail > p")
             .into_iter()
             .map(|x| x.text().trim().to_string())
             .collect::<Vec<_>>()
@@ -89,8 +77,11 @@ impl Noveler for Qbtr {
             return Err(NovelError::BlockedByCloudflare("Text".to_string()));
         }
 
-        let order = order.to_string();
-        Ok(Chapter { order, title, text })
+        Ok(Chapter {
+            order: order.to_string(),
+            title,
+            text,
+        })
     }
 
     fn get_next_page(&self, _document: &Elements) -> Result<Option<Url>, NovelError> {
@@ -98,19 +89,14 @@ impl Noveler for Qbtr {
     }
 
     fn process_chapter(&self, chapter: Chapter) -> Chapter {
-        let mut text = chapter.text;
-        for (re, s) in &self.replacer {
-            text = re.replace_all(&text, *s).to_string();
-        }
-
-        text = text
-            .split(['\n'])
+        let text = chapter
+            .text
+            .split('\n')
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .skip(2)
             .collect::<Vec<&str>>()
             .join("\n");
-
         Chapter { text, ..chapter }
     }
 }
@@ -165,11 +151,9 @@ mod tests {
         let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
         let document = visdom::Vis::load(html).unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(chapter.title, "我的大宝剑 第1章".to_string());
+        assert_eq!(chapter.title, "我的大宝剑 第1章");
         assert!(!chapter.text.is_empty());
         let chapter = novel.process_chapter(chapter);
-        dbg!(&chapter.text);
         assert!(chapter.text.starts_with("始皇历1838年，天元战争结束"));
         assert!(chapter.text.ends_with("充满了幸福和快乐。"));
     }
@@ -179,7 +163,6 @@ mod tests {
         let novel = Qbtr::new("https://www.qbtr.cc/tongren/3655.html").unwrap();
         let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
         let document = visdom::Vis::load(html).unwrap();
-        let url = novel.get_next_page(&document).unwrap();
-        assert_eq!(url, None);
+        assert_eq!(novel.get_next_page(&document).unwrap(), None);
     }
 }

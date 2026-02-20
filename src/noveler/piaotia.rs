@@ -19,8 +19,8 @@ pub(crate) struct Piaotia {
 impl Piaotia {
     pub(crate) fn new(url: &str) -> Result<Self, NovelError> {
         let base = Url::parse(url)?;
-
         let mut replacer = Vec::with_capacity(PATTERNS.len());
+
         for (pat, s) in PATTERNS {
             let regex = Regex::new(pat)?;
             replacer.push((regex, s));
@@ -42,12 +42,12 @@ impl Noveler for Piaotia {
     }
 
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
-        let selector = r"div.title h1";
-        let name = document.find(selector).text().replace("最新章节", "");
-
-        let selector = r"meta[name=author]";
+        let name = document
+            .find(r"div.title h1")
+            .text()
+            .replace("最新章节", "");
         let author = document
-            .find(selector)
+            .find(r"meta[name=author]")
             .attr("content")
             .ok_or(NovelError::NotFound("author content".to_string()))?
             .to_string();
@@ -55,9 +55,8 @@ impl Noveler for Piaotia {
     }
 
     fn get_chapter_urls_sorted(&self, document: &Elements) -> Result<Vec<Url>, NovelError> {
-        let selector = r"div.centent li a";
         document
-            .find(selector)
+            .find(r"div.centent li a")
             .into_iter()
             .map(|x| {
                 x.get_attribute("href")
@@ -69,20 +68,22 @@ impl Noveler for Piaotia {
     }
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
-        let selector = r"H1";
-        let title = document.find(selector).text().trim().to_string();
+        let title = document.find(r"H1").text().trim().to_string();
         if title.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Title".to_string()));
         }
 
-        let selector = r"html";
-        let text: String = document.find(selector).text();
+        // 飄天章節頁沒有明確的 content wrapper，直接取全頁文字再由 process_chapter 裁剪
+        let text = document.find(r"html").text();
         if text.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Text".to_string()));
         }
 
-        let order = order.to_string();
-        Ok(Chapter { order, title, text })
+        Ok(Chapter {
+            order: order.to_string(),
+            title,
+            text,
+        })
     }
 
     fn get_next_page(&self, _document: &Elements) -> Result<Option<Url>, NovelError> {
@@ -94,14 +95,12 @@ impl Noveler for Piaotia {
         for (re, s) in &self.replacer {
             text = re.replace_all(&text, *s).to_string();
         }
-
         text = text
             .split(['\n', '\u{a0}'])
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect::<Vec<&str>>()
             .join("\n");
-
         Chapter { text, ..chapter }
     }
 }
@@ -160,10 +159,9 @@ mod tests {
         let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
         let document = visdom::Vis::load(html).unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(chapter.title, "射手凶猛 第一章 老地方".to_string());
+        assert_eq!(chapter.order, "1");
+        assert_eq!(chapter.title, "射手凶猛 第一章 老地方");
         let chapter = novel.process_chapter(chapter);
-        dbg!(&chapter.text);
         assert!(chapter.text.starts_with("六月的首都日渐炎热。"));
         assert!(chapter.text.ends_with("“开个机子。”"));
     }
@@ -174,13 +172,9 @@ mod tests {
         let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER2);
         let document = visdom::Vis::load(html).unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(
-            chapter.title,
-            "我本无意成仙  第1章 一笑出门去，千里落花风".to_string()
-        );
+        assert_eq!(chapter.order, "1");
+        assert_eq!(chapter.title, "我本无意成仙  第1章 一笑出门去，千里落花风");
         let chapter = novel.process_chapter(chapter);
-        dbg!(&chapter.text);
         assert!(chapter.text.starts_with("碧蓝的天空上飘着几朵积云"));
         assert!(chapter.text.ends_with("宋游依旧坐着，看那群人走近。"));
     }
@@ -190,7 +184,6 @@ mod tests {
         let novel = Piaotia::new("https://www.piaotia.com/html/14/14881/").unwrap();
         let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
         let document = visdom::Vis::load(html).unwrap();
-        let url = novel.get_next_page(&document).unwrap();
-        assert_eq!(url, None);
+        assert_eq!(novel.get_next_page(&document).unwrap(), None);
     }
 }

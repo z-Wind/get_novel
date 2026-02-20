@@ -1,15 +1,11 @@
 /// 稷下書院 <https://www.novel543.com/>
 use super::{Book, Chapter, NovelError, Noveler};
-use regex::Regex;
 use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
-const PATTERNS: [(&str, &str); 0] = [];
-
 pub(crate) struct Novel543 {
     base: Url,
-    replacer: Vec<(Regex, &'static str)>,
 }
 
 impl Novel543 {
@@ -20,20 +16,11 @@ impl Novel543 {
             Ok(mut path) => {
                 path.clear();
             }
-            Err(()) => {
-                return Err(NovelError::CannotBeABase(url.to_string()));
-            }
+            Err(()) => return Err(NovelError::CannotBeABase(url.to_string())),
         }
 
         base.set_query(None);
-
-        let mut replacer = Vec::with_capacity(PATTERNS.len());
-        for (pat, s) in PATTERNS {
-            let regex = Regex::new(pat)?;
-            replacer.push((regex, s));
-        }
-
-        Ok(Self { base, replacer })
+        Ok(Self { base })
     }
 }
 
@@ -45,18 +32,20 @@ impl Display for Novel543 {
 
 impl Noveler for Novel543 {
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
-        let selector = r"h1.title.is-2";
-        let name = document.find(selector).text().replace(" 章節列表", "");
-
-        let selector = r"h2.title.is-4";
-        let author = document.find(selector).text().replace("作者 / ", "");
+        let name = document
+            .find(r"h1.title.is-2")
+            .text()
+            .replace(" 章節列表", "");
+        let author = document
+            .find(r"h2.title.is-4")
+            .text()
+            .replace("作者 / ", "");
         Ok(Book { name, author })
     }
 
     fn get_chapter_urls_sorted(&self, document: &Elements) -> Result<Vec<Url>, NovelError> {
-        let selector = r"ul.flex.one.two-700.three-900.all > li > a";
         document
-            .find(selector)
+            .find(r"ul.flex.one.two-700.three-900.all > li > a")
             .into_iter()
             .map(|x| {
                 x.get_attribute("href")
@@ -68,35 +57,39 @@ impl Noveler for Novel543 {
     }
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
-        let selector = r"#chapterWarp > div.chapter-content.px-3 > h1";
-        let title = document.find(selector).text().trim().to_string();
+        let title = document
+            .find(r"#chapterWarp > div.chapter-content.px-3 > h1")
+            .text()
+            .trim()
+            .to_string();
         if title.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Title".to_string()));
         }
 
-        let selector = r"#chapterWarp > div.chapter-content.px-3 > div";
-        let text: String = document.find(selector).text();
+        let text = document
+            .find(r"#chapterWarp > div.chapter-content.px-3 > div")
+            .text();
         if text.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Text".to_string()));
         }
 
-        let order = order.to_string();
-        Ok(Chapter { order, title, text })
+        Ok(Chapter {
+            order: order.to_string(),
+            title,
+            text,
+        })
     }
 
     fn get_next_page(&self, document: &Elements) -> Result<Option<Url>, NovelError> {
-        let selector = r"head > link:nth-last-of-type(1)";
         let curr_page = document
-            .find(selector)
+            .find(r"head > link:nth-last-of-type(1)")
             .attr("href")
             .ok_or(NovelError::NotFound("curr_page href".to_string()))?
             .to_string();
         let curr_page = Url::parse(&curr_page)?;
 
-        // std::fs::write("test.html", &document.html())?;
-        let selector = r"#read > div > div.warp.my-5.foot-nav > a:nth-child(5)";
         let next_page = document
-            .find(selector)
+            .find(r"#read > div > div.warp.my-5.foot-nav > a:nth-child(5)")
             .attr("href")
             .ok_or(NovelError::NotFound("next_page href".to_string()))?
             .to_string();
@@ -114,18 +107,14 @@ impl Noveler for Novel543 {
     }
 
     fn process_chapter(&self, chapter: Chapter) -> Chapter {
-        let mut text = chapter.text.trim().to_string();
-        for (re, s) in &self.replacer {
-            text = re.replace_all(&text, *s).to_string();
-        }
-
-        text = text
+        let text = chapter
+            .text
+            .trim()
             .split_inclusive('。')
             .map(|s| s.trim().replace('㱕', ""))
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
             .join("\n");
-
         Chapter { text, ..chapter }
     }
 }
@@ -145,8 +134,7 @@ mod tests {
 
     #[test]
     fn test_get_book_info() {
-        let html = CONTENTS;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS).unwrap();
         let novel = Novel543::new("https://www.novel543.com/0413188175/dir").unwrap();
         let book = novel.get_book_info(&document).unwrap();
         assert_eq!(
@@ -160,8 +148,7 @@ mod tests {
 
     #[test]
     fn test_get_chapter_urls_sorted() {
-        let html = CONTENTS;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS).unwrap();
         let novel = Novel543::new("https://www.novel543.com/0413188175/dir").unwrap();
         let urls = novel.get_chapter_urls_sorted(&document).unwrap();
         assert_eq!(
@@ -176,30 +163,27 @@ mod tests {
 
     #[test]
     fn test_get_chapter_content() {
-        let html = CHAPTER;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CHAPTER).unwrap();
         let novel = Novel543::new("https://www.novel543.com/0413188175/dir").unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1".to_string());
+        assert_eq!(chapter.order, "1");
         assert_eq!(
             chapter.title,
-            "我的大寶劍 - 第一章 這不是性騷擾,所以不許投訴我! (1/2)".to_string()
+            "我的大寶劍 - 第一章 這不是性騷擾,所以不許投訴我! (1/2)"
         );
         let chapter = novel.process_chapter(chapter);
-        dbg!(&chapter.text);
         assert!(chapter.text.starts_with("時為始皇曆1840年"));
         assert!(chapter.text.ends_with("可是相當相當寶貴人生經驗啊。"));
     }
 
     #[test]
     fn test_get_next_page() {
-        let html = CHAPTER;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CHAPTER).unwrap();
         let novel = Novel543::new("https://www.novel543.com/0413188175/dir").unwrap();
         let url = novel.get_next_page(&document).unwrap().unwrap();
         assert_eq!(
             url,
-            Url::parse("https://www.novel543.com/0413188175/8001_1_2.html").unwrap(),
+            Url::parse("https://www.novel543.com/0413188175/8001_1_2.html").unwrap()
         );
     }
 }

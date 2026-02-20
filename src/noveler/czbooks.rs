@@ -18,7 +18,6 @@ impl Czbooks {
             let regex = Regex::new(pat)?;
             replacer.push((regex, s));
         }
-
         Ok(Self { replacer })
     }
 }
@@ -31,18 +30,17 @@ impl Display for Czbooks {
 
 impl Noveler for Czbooks {
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
-        let selector = r"span.title";
-        let name = document.find(selector).text().replace(['《', '》'], "");
-
-        let selector = r"span.author > a";
-        let author = document.find(selector).text();
+        let name = document
+            .find(r"span.title")
+            .text()
+            .replace(['《', '》'], "");
+        let author = document.find(r"span.author > a").text();
         Ok(Book { name, author })
     }
 
     fn get_chapter_urls_sorted(&self, document: &Elements) -> Result<Vec<Url>, NovelError> {
-        let selector = r"ul.nav.chapter-list > li > a";
         document
-            .find(selector)
+            .find(r"ul.nav.chapter-list > li > a")
             .into_iter()
             .map(|x| {
                 x.get_attribute("href")
@@ -58,20 +56,21 @@ impl Noveler for Czbooks {
     }
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
-        let selector = r"div.name";
-        let title = document.find(selector).text().trim().to_string();
+        let title = document.find(r"div.name").text().trim().to_string();
         if title.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Title".to_string()));
         }
 
-        let selector = r"div.content";
-        let text = document.find(selector).text();
+        let text = document.find(r"div.content").text();
         if text.is_empty() {
             return Err(NovelError::BlockedByCloudflare("Text".to_string()));
         }
 
-        let order = order.to_string();
-        Ok(Chapter { order, title, text })
+        Ok(Chapter {
+            order: order.to_string(),
+            title,
+            text,
+        })
     }
 
     fn get_next_page(&self, _document: &Elements) -> Result<Option<Url>, NovelError> {
@@ -83,7 +82,6 @@ impl Noveler for Czbooks {
         for (re, s) in &self.replacer {
             text = re.replace_all(&text, *s).to_string();
         }
-
         Chapter { text, ..chapter }
     }
 }
@@ -100,7 +98,6 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/czbooks/contents2.html"
     ));
-
     static CHAPTER: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/czbooks/chapter.html"
@@ -112,8 +109,7 @@ mod tests {
 
     #[test]
     fn test_get_book_info() {
-        let html = CONTENTS;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS).unwrap();
         let novel = Czbooks::new().unwrap();
         let book = novel.get_book_info(&document).unwrap();
         assert_eq!(
@@ -127,8 +123,7 @@ mod tests {
 
     #[test]
     fn test_get_book_info2() {
-        let html = CONTENTS2;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS2).unwrap();
         let novel = Czbooks::new().unwrap();
         let book = novel.get_book_info(&document).unwrap();
         assert_eq!(
@@ -142,8 +137,7 @@ mod tests {
 
     #[test]
     fn test_get_chapter_urls_sorted() {
-        let html = CONTENTS;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS).unwrap();
         let novel = Czbooks::new().unwrap();
         let urls = novel.get_chapter_urls_sorted(&document).unwrap();
         assert_eq!(
@@ -158,8 +152,7 @@ mod tests {
 
     #[test]
     fn test_get_chapter_urls_sorted2() {
-        let html = CONTENTS2;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CONTENTS2).unwrap();
         let novel = Czbooks::new().unwrap();
         let urls = novel.get_chapter_urls_sorted(&document).unwrap();
         assert_eq!(
@@ -174,31 +167,24 @@ mod tests {
 
     #[test]
     fn test_get_chapter_content() {
-        let html = CHAPTER;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CHAPTER).unwrap();
         let novel = Czbooks::new().unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(chapter.title, "《射手凶猛》第1章 老地方".to_string());
+        assert_eq!(chapter.order, "1");
+        assert_eq!(chapter.title, "《射手凶猛》第1章 老地方");
         let chapter = novel.process_chapter(chapter);
-        dbg!(&chapter.text);
         assert!(chapter.text.starts_with("六月的首都日漸炎熱"));
         assert!(chapter.text.ends_with("“開個機子。”"));
     }
 
     #[test]
     fn test_get_chapter_content2() {
-        let html = CHAPTER2;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CHAPTER2).unwrap();
         let novel = Czbooks::new().unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1".to_string());
-        assert_eq!(
-            chapter.title,
-            "《這個世界過於危險》第11章：暴食（上）".to_string()
-        );
+        assert_eq!(chapter.order, "1");
+        assert_eq!(chapter.title, "《這個世界過於危險》第11章：暴食（上）");
         let chapter = novel.process_chapter(chapter);
-        dbg!(&chapter.text);
         assert!(chapter.text.starts_with("11月5日，周一。"));
         assert!(chapter
             .text
@@ -207,10 +193,8 @@ mod tests {
 
     #[test]
     fn test_get_next_page() {
-        let html = CHAPTER;
-        let document = visdom::Vis::load(html).unwrap();
+        let document = visdom::Vis::load(CHAPTER).unwrap();
         let novel = Czbooks::new().unwrap();
-        let url = novel.get_next_page(&document).unwrap();
-        assert_eq!(url, None);
+        assert_eq!(novel.get_next_page(&document).unwrap(), None);
     }
 }
