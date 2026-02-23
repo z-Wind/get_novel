@@ -5,6 +5,7 @@ mod piaotia;
 mod qbtr;
 mod uukanshu;
 
+use futures::future::BoxFuture;
 use reqwest::header;
 use reqwest::{Client, IntoUrl};
 use std::collections::HashMap;
@@ -66,6 +67,18 @@ pub(crate) enum NovelError {
     CloudflareBlock(u16),
     #[error("URL {0} not supported")]
     UnsupportedUrl(String),
+}
+
+impl NovelError {
+    /// 判斷是否值得重試
+    fn is_retryable(&self) -> bool {
+        match self {
+            Self::ReqwestError(e) => {
+                e.is_timeout() || e.is_connect() || e.status().is_some_and(|s| s.is_server_error())
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -167,48 +180,63 @@ pub trait Noveler: Display + Sync + Send + 'static {
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError>;
     fn get_next_page(&self, document: &Elements) -> Result<Option<Url>, NovelError>;
     fn process_chapter(&self, chapter: Chapter) -> Chapter;
-}
 
-/// `process_url` 獨立為泛型函式，避免 `impl Future` 回傳型別破壞 dyn compatibility
-async fn process_url(
-    noveler: &dyn Noveler,
-    client: Client,
-    order: &str,
-    url: Url,
-) -> Result<(Chapter, Option<Url>), NovelError> {
-    let document = get_html_and_fix_encoding(client, url, noveler.need_encoding()).await?;
-    let document = visdom::Vis::load(document)?;
+    fn fetch_chapter<'a>(
+        &'a self,
+        client: Client,
+        order: &'a str,
+        url: Url,
+    ) -> BoxFuture<'a, Result<(Chapter, Option<Url>), NovelError>> {
+        Box::pin(async move {
+            let document = get_html_and_fix_encoding(client, url, self.need_encoding()).await?;
+            let document = visdom::Vis::load(document)?;
 
-    let chapter = noveler.get_chapter(&document, order)?;
-    let chapter = noveler.process_chapter(chapter);
+            let chapter = self.get_chapter(&document, order)?;
+            let chapter = self.process_chapter(chapter);
 
-    let next_page = noveler.get_next_page(&document)?;
+            let next_page = self.get_next_page(&document)?;
 
-    Ok((chapter, next_page))
+            Ok((chapter, next_page))
+        })
+    }
 }
 
 /// 代表一個等待下載的任務，附帶重試次數
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Task {
     order: String,
     url: Url,
     retry_count: u32,
+
+    counter: Arc<AtomicUsize>,
+    tx: mpsc::Sender<Self>,
 }
 
 impl Task {
-    fn new(order: String, url: Url) -> Self {
+    fn new(order: String, url: Url, counter: Arc<AtomicUsize>, tx: mpsc::Sender<Self>) -> Self {
+        counter.fetch_add(1, Ordering::Relaxed);
         Self {
             order,
             url,
             retry_count: 0,
+            counter,
+            tx,
         }
     }
 
-    fn with_retry(&self) -> Self {
-        Self {
-            order: self.order.clone(),
-            url: self.url.clone(),
-            retry_count: self.retry_count + 1,
+    fn with_retry(mut self) -> Self {
+        self.retry_count += 1;
+
+        self
+    }
+}
+
+impl Drop for Task {
+    fn drop(&mut self) {
+        let prev = self.counter.fetch_sub(1, Ordering::Release);
+
+        if prev > 0 {
+            println!("{:<10} => {:05}", "Pending", prev);
         }
     }
 }
@@ -227,68 +255,55 @@ fn enqueue_tasks(
     noveler: &Arc<dyn Noveler>,
     document: &Elements,
     dir: &Path,
-    tx: &mpsc::Sender<Task>,
-) -> Result<usize, NovelError> {
+    tx: mpsc::Sender<Task>,
+    pending: Arc<AtomicUsize>,
+) -> Result<(), NovelError> {
     let urls = noveler.get_chapter_urls_sorted(document)?;
     let urls = noveler.append_urls_with_orders(urls);
     let urls = remove_url_with_exist_file(urls, dir);
 
-    let count = urls.len();
-    let tx = tx.clone();
     tokio::spawn(async move {
         for (order, url) in urls {
-            if let Err(err) = tx.send(Task::new(order, url)).await {
+            if let Err(err) = tx
+                .send(Task::new(order, url, pending.clone(), tx.clone()))
+                .await
+            {
                 eprintln!("Failed to send task: {err}");
             }
         }
     });
 
-    Ok(count)
-}
-
-/// 儲存章節檔案，若有 `next_page` 則新增一個任務並遞增 `pending`
-async fn save_chapter_and_enqueue_next(
-    chapter: Chapter,
-    next_page: Option<Url>,
-    dir: &Path,
-    tx: &mpsc::Sender<Task>,
-    pending: &Arc<AtomicUsize>,
-) -> Result<(), NovelError> {
-    tokio::fs::write(dir.join(file_name(&chapter.order)), chapter.content()).await?;
-    println!("{:>10} => {:<8}", "Done", chapter.order);
-
-    if let Some(next_url) = next_page {
-        let order = format!("{}_n", chapter.order);
-
-        pending.fetch_add(1, Ordering::Relaxed);
-
-        let tx = tx.clone();
-        let pending_clone = pending.clone();
-        tokio::spawn(async move {
-            if let Err(err) = tx.send(Task::new(order, next_url)).await {
-                eprintln!("Failed to send next_page task: {err}");
-                // send 失敗代表 rx 已關閉，任務不會被執行，補償 pending
-                pending_clone.fetch_sub(1, Ordering::Relaxed);
-            }
-        });
-    }
-
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
-pub(crate) async fn download_novel(
-    noveler: Arc<dyn Noveler>,
-    url_contents: &str,
+async fn save_chapter(chapter: Chapter, dir: &Path) -> Result<(), NovelError> {
+    let path = dir.join(format!("{}.txt", chapter.order));
+
+    tokio::fs::write(path, chapter.content()).await?;
+
+    println!("{:>10} => {}", "Saved", chapter.order);
+    Ok(())
+}
+
+async fn enqueue_next_page(
+    current_order: String,
+    next_url: Url,
+    tx: &mpsc::Sender<Task>,
+    pending: Arc<AtomicUsize>,
+) {
+    let next_task = Task::new(format!("{current_order}_n"), next_url, pending, tx.clone());
+
+    if let Err(e) = tx.send(next_task).await {
+        eprintln!("Failed to enqueue next page: {e}");
+    }
+}
+
+fn create_client(
     headers: Option<header::HeaderMap>,
-    // Cloudflare 場景下需與取得 cookie 時的瀏覽器 UA 完全一致
-    cf_ua: Option<String>,
-    dir: &Path,
-    limit: usize,
-    interval: Duration,
-) -> Result<PathBuf, NovelError> {
+    cf_ua: Option<&String>,
+) -> Result<Client, NovelError> {
     // 若有 CF clearance，UA 必須與瀏覽器一致；否則用預設 UA
-    let user_agent = cf_ua.as_deref().unwrap_or(USER_AGENT);
+    let user_agent = cf_ua.map_or(USER_AGENT, |v| v);
 
     let mut client_builder = Client::builder()
         .user_agent(user_agent)
@@ -297,17 +312,34 @@ pub(crate) async fn download_novel(
     if let Some(h) = headers {
         client_builder = client_builder.default_headers(h).cookie_store(true);
     }
-    let client = client_builder.build()?;
+    let client = client_builder
+        .timeout(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .build()?;
 
-    let document =
+    Ok(client)
+}
+
+pub(crate) async fn download_novel(
+    noveler: Arc<dyn Noveler>,
+    url_contents: &str,
+    headers: Option<header::HeaderMap>,
+    // Cloudflare 場景下需與取得 cookie 時的瀏覽器 UA 完全一致
+    cf_ua: Option<&String>,
+    dir: &Path,
+    limit: usize,
+    interval: Duration,
+) -> Result<PathBuf, NovelError> {
+    let client = create_client(headers, cf_ua)?;
+
+    let html =
         get_html_and_fix_encoding(client.clone(), url_contents, noveler.need_encoding()).await?;
-    let document = visdom::Vis::load(document)?;
+    let document = visdom::Vis::load(html)?;
 
     let book = noveler.get_book_info(&document)?;
     if book.author.is_empty() || book.name.is_empty() {
         return Err(NovelError::BlockedByCloudflare("Book Info".to_string()));
     }
-    println!("{book}");
 
     let dir = dir
         .join("temp")
@@ -315,19 +347,21 @@ pub(crate) async fn download_novel(
         .join(book.to_string());
     tokio::fs::create_dir_all(dir.as_path()).await?;
 
-    let semaphore = Arc::new(Semaphore::new(limit));
     let (tx, mut rx) = mpsc::channel::<Task>(32);
+    let semaphore = Arc::new(Semaphore::new(limit));
 
     // pending 紀錄「尚未完成」的任務數（含正在執行的），用 AtomicUsize 跨 task 共享
     let pending = Arc::new(AtomicUsize::new(0));
-    let initial = enqueue_tasks(&noveler, &document, &dir, &tx)?;
-    pending.store(initial, Ordering::Relaxed);
 
     let mut visited: HashMap<String, TaskStatus> = HashMap::new();
     let mut join_set: JoinSet<Result<String, NovelError>> = JoinSet::new();
 
+    enqueue_tasks(&noveler, &document, &dir, tx, pending.clone())?;
+
+    println!("開始下載: {book} (併發限制: {limit}, 間隔: {interval:?})");
+
     loop {
-        if pending.load(Ordering::Relaxed) == 0 && join_set.is_empty() {
+        if rx.is_closed() && join_set.is_empty() {
             if visited
                 .values()
                 .any(|s| matches!(s, TaskStatus::Processing))
@@ -341,7 +375,6 @@ pub(crate) async fn download_novel(
         tokio::select! {
             Some(task) = rx.recv() => {
                 if let Some(TaskStatus::Success) = visited.get(&task.order) {
-                    pending.fetch_sub(1, Ordering::Relaxed);
                     continue;
                 }
 
@@ -349,7 +382,6 @@ pub(crate) async fn download_novel(
 
                 println!("{:>10} => {:<8}: {}", "Insert", task.order, task.url);
 
-                let tx = tx.clone();
                 let noveler = noveler.clone();
                 let dir = dir.clone();
                 let client = client.clone();
@@ -363,49 +395,26 @@ pub(crate) async fn download_novel(
 
                     println!("{:>10} => {:<8}: {}", "Process", task.order, task.url);
 
-                    let result = process_url(noveler.as_ref(), client, &task.order, task.url.clone()).await;
+                    let result = noveler.fetch_chapter(client, &task.order, task.url.clone()).await;
                     drop(permit);
 
                     match result {
                         Ok((chapter, next_page)) => {
-                            save_chapter_and_enqueue_next(chapter.clone(), next_page, &dir, &tx, &pending).await?;
-                            pending.fetch_sub(1, Ordering::Relaxed);
-                            Ok(chapter.order)
-                        }
-                        Err(e) if is_retryable(&e)  => {
-                            if task.retry_count < MAX_RETRIES {
-                                let delay = RETRY_BASE_DELAY_MS * 2u64.pow(task.retry_count);
+                            let order = chapter.order.clone();
 
-                                println!(
-                                    "{:>10} => {:<8}: {}, retry {}/{} after {}ms",
-                                    "Retry",
-                                    task.order,
-                                    e,
-                                    task.retry_count + 1,
-                                    MAX_RETRIES,
-                                    delay
-                                );
+                            save_chapter(chapter, &dir).await?;
 
-                                tokio::time::sleep(Duration::from_millis(delay)).await;
-
-                                // 重新入隊，pending 不減（任務仍在進行中）
-                                if let Err(err) = tx.send(task.with_retry()).await {
-                                    eprintln!("Failed to re-enqueue task: {err}");
-                                    pending.fetch_sub(1, Ordering::Relaxed);
-                                }
-                            } else {
-                                eprintln!(
-                                    "{:>10} => {}: exceeded {} retries, giving up",
-                                    "GiveUp", task.order, MAX_RETRIES
-                                );
-                                pending.fetch_sub(1, Ordering::Relaxed);
+                            if let Some(next_url) = next_page {
+                                enqueue_next_page(order.clone(), next_url, &task.tx, pending).await;
                             }
+
+                            Ok(order)
+                        }
+                        Err(e) if e.is_retryable() => {
+                            handle_retry(task, &e).await;
                             Err(e)
                         }
-                        Err(e) => {
-                            pending.fetch_sub(1, Ordering::Relaxed);
-                            Err(e)
-                        }
+                        Err(e) =>  Err(e),
                     }
                 });
             }
@@ -414,7 +423,6 @@ pub(crate) async fn download_novel(
                 match result {
                     Ok(Ok(order)) => {
                         visited.insert(order, TaskStatus::Success);
-                        println!("{:<10} => {:05}", "Pending", pending.load(Ordering::Relaxed));
                     }
                     Ok(Err(e)) => {
                         eprintln!("Task error: {e}");
@@ -428,11 +436,31 @@ pub(crate) async fn download_novel(
     }
 }
 
-fn is_retryable(e: &NovelError) -> bool {
-    match e {
-        NovelError::ReqwestError(re) => re.is_timeout() || re.is_connect(),
-        NovelError::BlockedByCloudflare(_) => true,
-        _ => false,
+async fn handle_retry(task: Task, e: &NovelError) {
+    if task.retry_count < MAX_RETRIES {
+        let delay = RETRY_BASE_DELAY_MS * 2u64.pow(task.retry_count);
+
+        println!(
+            "{:>10} => {:<8}: {}, retry {}/{} after {}ms",
+            "Retry",
+            task.order,
+            e,
+            task.retry_count + 1,
+            MAX_RETRIES,
+            delay
+        );
+
+        tokio::time::sleep(Duration::from_millis(delay)).await;
+
+        let tx = task.tx.clone();
+        if let Err(err) = tx.send(task.with_retry()).await {
+            eprintln!("Failed to re-enqueue task: {err}");
+        }
+    } else {
+        eprintln!(
+            "{:>10} => {}: exceeded {} retries, giving up",
+            "GiveUp", task.order, MAX_RETRIES
+        );
     }
 }
 
@@ -615,30 +643,33 @@ mod tests {
         let url = server.url();
         let fake: Arc<dyn Noveler> = Arc::new(FakeNoveler::new(url));
         let dir = TempDir::new("noveler_test_enqueue_tasks").unwrap();
-        let (tx, _) = mpsc::channel::<Task>(5);
+        let (tx, mut rx) = mpsc::channel::<Task>(100);
         let contents: &str = include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/tests/hjwzw/contents.html"
         ));
         let document = visdom::Vis::load(contents).unwrap();
-        let result = enqueue_tasks(&fake, &document, dir.path(), &tx).unwrap();
-        assert_eq!(result, 10);
+        let pending = Arc::new(AtomicUsize::new(0));
+
+        enqueue_tasks(&fake, &document, dir.path(), tx, pending.clone()).unwrap();
+
+        let mut i = 0;
+        while rx.recv().await.is_some() {
+            i += 1;
+        }
+        assert_eq!(i, 10);
     }
 
     #[tokio::test]
     async fn test_save_chapter() {
         let dir = TempDir::new("noveler_test_save_chapter").unwrap();
-        let (tx, _) = mpsc::channel::<Task>(5);
-        let pending = Arc::new(AtomicUsize::new(1));
 
         let chapter = Chapter {
             order: "order".to_string(),
             title: "title".to_string(),
             text: "text".to_string(),
         };
-        save_chapter_and_enqueue_next(chapter.clone(), None, dir.path(), &tx, &pending)
-            .await
-            .unwrap();
+        save_chapter(chapter.clone(), dir.path()).await.unwrap();
 
         let file_path = dir.path().join(file_name(&chapter.order));
         assert!(file_path.is_file());

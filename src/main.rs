@@ -67,7 +67,7 @@ async fn main() {
         )])
     });
 
-    match get_novel(&args.url_contents, headers, args.cf_ua, dir).await {
+    match get_novel(&args.url_contents, headers, args.cf_ua.as_ref(), dir).await {
         Ok(chapter_dir) => {
             if let Err(e) = combine_txt(&chapter_dir).await {
                 eprintln!("Error combining txt: {e}");
@@ -90,7 +90,7 @@ async fn main() {
 async fn get_novel(
     url_contents: &str,
     headers: Option<header::HeaderMap>,
-    cf_ua: Option<String>,
+    cf_ua: Option<&String>,
     dir: &Path,
 ) -> Result<std::path::PathBuf, NovelError> {
     let config = PLATFORMS

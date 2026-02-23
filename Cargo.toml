@@ -15,6 +15,7 @@ url = "2.5"
 encoding_rs = "0.8"
 chardetng = "0.1"
 visdom = { version = "1.0", features = ["destroy"] }
+futures = "0.3"
 
 [dev-dependencies]
 mockito = "1.7"
