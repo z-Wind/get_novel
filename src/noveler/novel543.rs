@@ -63,14 +63,14 @@ impl Noveler for Novel543 {
             .trim()
             .to_string();
         if title.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+            return Err(NovelError::NotFound("Chapter Title".to_string()));
         }
 
         let text = document
             .find(r"#chapterWarp > div.chapter-content.px-3 > div")
             .text();
         if text.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+            return Err(NovelError::NotFound("Chapter Text".to_string()));
         }
 
         Ok(Chapter {

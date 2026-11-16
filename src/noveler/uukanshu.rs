@@ -79,12 +79,12 @@ impl Noveler for UUkanshu {
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
         let title = document.find(r"div.book.read h1").text().trim().to_string();
         if title.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+            return Err(NovelError::NotFound("Chapter Title".to_string()));
         }
 
         let text = document.find(r"div.readcotent").text();
         if text.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+            return Err(NovelError::NotFound("Chapter Text".to_string()));
         }
 
         Ok(Chapter {
@@ -174,7 +174,7 @@ mod tests {
         let chapter = novel.get_chapter(&document, "1").unwrap();
         assert_eq!(chapter.order, "1");
         assert_eq!(chapter.title, "第一章 老地方");
-        assert!(!chapter.text.is_empty());
+        assert_ne!(chapter.text, "");
         let chapter = novel.process_chapter(chapter);
         assert!(chapter.text.starts_with("六月的首都日漸炎熱。"));
         assert!(chapter.text.ends_with("「開個機子。」"));

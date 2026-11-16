@@ -6,21 +6,22 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.5", features = ["derive"] }
-regex = "1.12"
+clap = { version = "4.6", features = ["derive"] }
+regex = "1.13"
 reqwest = { version = "0.13", features = ["cookies"] }
 tokio = { version = "1", features = ["full"] }
 thiserror = "2.0"
 url = "2.5"
 encoding_rs = "0.8"
-chardetng = "0.1"
 visdom = { version = "1.0", features = ["destroy"] }
 futures = "0.3"
+chromiumoxide = "0.9"
 
 [dev-dependencies]
 mockito = "1.7"
 tempdir = "0.3"
 nipper = "0.1"
-scraper = "0.25"
+scraper = "0.29"
 accessibility-scraper = "0.0"
 crabquery = "0.1"
+chardetng = "1.0"

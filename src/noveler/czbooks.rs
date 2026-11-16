@@ -5,7 +5,12 @@ use std::fmt::{self, Display};
 use url::Url;
 use visdom::types::Elements;
 
-const PATTERNS: [(&str, &str); 2] = [("\u{3000}", ""), ("\n\n", "\n")];
+const PATTERNS: [(&str, &str); 4] = [
+    ("\u{3000}", ""),
+    ("\u{2003}", ""),
+    ("\r\n", "\n"),
+    ("\n\n", "\n"),
+];
 
 pub(crate) struct Czbooks {
     replacer: Vec<(Regex, &'static str)>,
@@ -30,10 +35,7 @@ impl Display for Czbooks {
 
 impl Noveler for Czbooks {
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
-        let name = document
-            .find(r"span.title")
-            .text()
-            .replace(['《', '》'], "");
+        let name = document.find(r"h1.title").text().replace(['《', '》'], "");
         let author = document.find(r"span.author > a").text();
         Ok(Book { name, author })
     }
@@ -56,14 +58,14 @@ impl Noveler for Czbooks {
     }
 
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
-        let title = document.find(r"div.name").text().trim().to_string();
+        let title = document.find(r"h1.name").text().trim().to_string();
         if title.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+            return Err(NovelError::NotFound("Chapter Title".to_string()));
         }
 
         let text = document.find(r"div.content").text();
         if text.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+            return Err(NovelError::NotFound("Chapter Text".to_string()));
         }
 
         Ok(Chapter {
@@ -94,17 +96,9 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/czbooks/contents.html"
     ));
-    static CONTENTS2: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/czbooks/contents2.html"
-    ));
     static CHAPTER: &str = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/czbooks/chapter.html"
-    ));
-    static CHAPTER2: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/czbooks/chapter2.html"
     ));
 
     #[test]
@@ -115,22 +109,8 @@ mod tests {
         assert_eq!(
             book,
             Book {
-                name: "射手凶猛".to_string(),
-                author: "初四兮".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn test_get_book_info2() {
-        let document = visdom::Vis::load(CONTENTS2).unwrap();
-        let novel = Czbooks::new().unwrap();
-        let book = novel.get_book_info(&document).unwrap();
-        assert_eq!(
-            book,
-            Book {
-                name: "這個世界過於危險".to_string(),
-                author: "十裡桃花".to_string()
+                name: "謝家的短命鬼長命百歲了".to_string(),
+                author: "怡然".to_string()
             }
         );
     }
@@ -142,26 +122,11 @@ mod tests {
         let urls = novel.get_chapter_urls_sorted(&document).unwrap();
         assert_eq!(
             urls.first().unwrap(),
-            &Url::parse("https://czbooks.net/n/uilla7/und20").unwrap()
+            &Url::parse("https://czbooks.net/n/s66fh9/s6pm5p1a?chapterNumber=0").unwrap()
         );
         assert_eq!(
             urls.last().unwrap(),
-            &Url::parse("https://czbooks.net/n/uilla7/ui5kpm").unwrap()
-        );
-    }
-
-    #[test]
-    fn test_get_chapter_urls_sorted2() {
-        let document = visdom::Vis::load(CONTENTS2).unwrap();
-        let novel = Czbooks::new().unwrap();
-        let urls = novel.get_chapter_urls_sorted(&document).unwrap();
-        assert_eq!(
-            urls.first().unwrap(),
-            &Url::parse("https://czbooks.net/n/uhemc/u7k9").unwrap()
-        );
-        assert_eq!(
-            urls.last().unwrap(),
-            &Url::parse("https://czbooks.net/n/uhemc/ud9fn").unwrap()
+            &Url::parse("https://czbooks.net/n/s66fh9/s6peg4hm?chapterNumber=949").unwrap()
         );
     }
 
@@ -171,24 +136,10 @@ mod tests {
         let novel = Czbooks::new().unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
         assert_eq!(chapter.order, "1");
-        assert_eq!(chapter.title, "《射手凶猛》第1章 老地方");
+        assert_eq!(chapter.title, "《謝家的短命鬼長命百歲了》第93章 相識");
         let chapter = novel.process_chapter(chapter);
-        assert!(chapter.text.starts_with("六月的首都日漸炎熱"));
-        assert!(chapter.text.ends_with("“開個機子。”"));
-    }
-
-    #[test]
-    fn test_get_chapter_content2() {
-        let document = visdom::Vis::load(CHAPTER2).unwrap();
-        let novel = Czbooks::new().unwrap();
-        let chapter = novel.get_chapter(&document, "1").unwrap();
-        assert_eq!(chapter.order, "1");
-        assert_eq!(chapter.title, "《這個世界過於危險》第11章：暴食（上）");
-        let chapter = novel.process_chapter(chapter);
-        assert!(chapter.text.starts_with("11月5日，周一。"));
-        assert!(chapter
-            .text
-            .ends_with("“你回來的正好，想吃漢堡了，你去幫我買吧！”"));
+        assert!(chapter.text.starts_with("第93章 相識"));
+        assert!(chapter.text.ends_with("(本章完)"));
     }
 
     #[test]

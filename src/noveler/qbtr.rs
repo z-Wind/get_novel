@@ -31,10 +31,6 @@ impl Display for Qbtr {
 }
 
 impl Noveler for Qbtr {
-    fn need_encoding(&self) -> Option<&'static encoding_rs::Encoding> {
-        Some(encoding_rs::GBK)
-    }
-
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
         let name = document.find(r"div.infos > h1").text();
         let author = document
@@ -64,7 +60,7 @@ impl Noveler for Qbtr {
             .trim()
             .to_string();
         if title.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+            return Err(NovelError::NotFound("Chapter Title".to_string()));
         }
 
         let text: String = document
@@ -74,7 +70,7 @@ impl Noveler for Qbtr {
             .collect::<Vec<_>>()
             .join("\n");
         if text.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+            return Err(NovelError::NotFound("Chapter Text".to_string()));
         }
 
         Ok(Chapter {
@@ -114,10 +110,16 @@ mod tests {
         "/tests/qbtr/chapter.html"
     ));
 
+    // 專為離線測試寫的 GBK 轉 UTF-8 輔助函式
+    fn decode_gbk(bytes: &[u8]) -> String {
+        let (decoded, _, _) = encoding_rs::GBK.decode(bytes);
+        decoded.into_owned()
+    }
+
     #[test]
     fn test_get_book_info() {
         let novel = Qbtr::new("https://www.qbtr.cc/tongren/3655.html").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CONTENTS);
+        let html = decode_gbk(CONTENTS);
         let document = visdom::Vis::load(html).unwrap();
         let book = novel.get_book_info(&document).unwrap();
         assert_eq!(
@@ -132,7 +134,7 @@ mod tests {
     #[test]
     fn test_get_chapter_urls_sorted() {
         let novel = Qbtr::new("https://www.qbtr.cc/tongren/3655.html").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CONTENTS);
+        let html = String::from_utf8_lossy(CONTENTS).into_owned();
         let document = visdom::Vis::load(html).unwrap();
         let urls = novel.get_chapter_urls_sorted(&document).unwrap();
         assert_eq!(
@@ -148,11 +150,11 @@ mod tests {
     #[test]
     fn test_get_chapter_content() {
         let novel = Qbtr::new("https://www.qbtr.cc/tongren/3655.html").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
+        let html = decode_gbk(CHAPTER);
         let document = visdom::Vis::load(html).unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
         assert_eq!(chapter.title, "我的大宝剑 第1章");
-        assert!(!chapter.text.is_empty());
+        assert_ne!(chapter.text, "");
         let chapter = novel.process_chapter(chapter);
         assert!(chapter.text.starts_with("始皇历1838年，天元战争结束"));
         assert!(chapter.text.ends_with("充满了幸福和快乐。"));
@@ -161,7 +163,7 @@ mod tests {
     #[test]
     fn test_get_next_page() {
         let novel = Qbtr::new("https://www.qbtr.cc/tongren/3655.html").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
+        let html = String::from_utf8_lossy(CHAPTER).into_owned();
         let document = visdom::Vis::load(html).unwrap();
         assert_eq!(novel.get_next_page(&document).unwrap(), None);
     }

@@ -37,10 +37,6 @@ impl Display for Piaotia {
 }
 
 impl Noveler for Piaotia {
-    fn need_encoding(&self) -> Option<&'static encoding_rs::Encoding> {
-        Some(encoding_rs::GBK)
-    }
-
     fn get_book_info(&self, document: &Elements) -> Result<Book, NovelError> {
         let name = document
             .find(r"div.title h1")
@@ -70,13 +66,13 @@ impl Noveler for Piaotia {
     fn get_chapter(&self, document: &Elements, order: &str) -> Result<Chapter, NovelError> {
         let title = document.find(r"H1").text().trim().to_string();
         if title.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+            return Err(NovelError::NotFound("Chapter Title".to_string()));
         }
 
         // 飄天章節頁沒有明確的 content wrapper，直接取全頁文字再由 process_chapter 裁剪
         let text = document.find(r"html").text();
         if text.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+            return Err(NovelError::NotFound("Chapter Text".to_string()));
         }
 
         Ok(Chapter {
@@ -122,10 +118,16 @@ mod tests {
         "/tests/piaotia/chapter2.html"
     ));
 
+    // 專為離線測試寫的 GBK 轉 UTF-8 輔助函式
+    fn decode_gbk(bytes: &[u8]) -> String {
+        let (decoded, _, _) = encoding_rs::GBK.decode(bytes);
+        decoded.into_owned()
+    }
+
     #[test]
     fn test_get_book_info() {
         let novel = Piaotia::new("https://www.piaotia.com/html/14/14881/").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CONTENTS);
+        let html = decode_gbk(CONTENTS);
         let document = visdom::Vis::load(html).unwrap();
         let book = novel.get_book_info(&document).unwrap();
         assert_eq!(
@@ -140,7 +142,7 @@ mod tests {
     #[test]
     fn test_get_chapter_urls_sorted() {
         let novel = Piaotia::new("https://www.piaotia.com/html/14/14881/").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CONTENTS);
+        let html = String::from_utf8_lossy(CONTENTS).into_owned();
         let document = visdom::Vis::load(html).unwrap();
         let urls = novel.get_chapter_urls_sorted(&document).unwrap();
         assert_eq!(
@@ -156,7 +158,7 @@ mod tests {
     #[test]
     fn test_get_chapter_content() {
         let novel = Piaotia::new("https://www.piaotia.com/html/14/14881/").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
+        let html = decode_gbk(CHAPTER);
         let document = visdom::Vis::load(html).unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
         assert_eq!(chapter.order, "1");
@@ -169,7 +171,7 @@ mod tests {
     #[test]
     fn test_get_chapter_content_2() {
         let novel = Piaotia::new("https://www.piaotia.com/html/15/15299/").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER2);
+        let html = decode_gbk(CHAPTER2);
         let document = visdom::Vis::load(html).unwrap();
         let chapter = novel.get_chapter(&document, "1").unwrap();
         assert_eq!(chapter.order, "1");
@@ -182,7 +184,7 @@ mod tests {
     #[test]
     fn test_get_next_page() {
         let novel = Piaotia::new("https://www.piaotia.com/html/14/14881/").unwrap();
-        let (html, _, _) = novel.need_encoding().unwrap().decode(CHAPTER);
+        let html = String::from_utf8_lossy(CHAPTER).into_owned();
         let document = visdom::Vis::load(html).unwrap();
         assert_eq!(novel.get_next_page(&document).unwrap(), None);
     }

@@ -60,14 +60,14 @@ impl Noveler for Hjwzw {
             .trim()
             .to_string();
         if title.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Title".to_string()));
+            return Err(NovelError::NotFound("Chapter Title".to_string()));
         }
 
         let doc = document.cloned();
         doc.find("div#Pan_Ad1").remove();
         let text = doc.find(r"table:nth-of-type(7) div:nth-of-type(4)").text();
         if text.is_empty() {
-            return Err(NovelError::BlockedByCloudflare("Text".to_string()));
+            return Err(NovelError::NotFound("Chapter Text".to_string()));
         }
 
         Ok(Chapter {
