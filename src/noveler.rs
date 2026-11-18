@@ -7,6 +7,7 @@ mod uukanshu;
 
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::{self, Write};
@@ -130,16 +131,63 @@ fn file_name(order: &str) -> String {
     format!("{order}.txt")
 }
 
-fn remove_url_with_exist_file(urls: Vec<(String, Url)>, dir: &Path) -> Vec<(String, Url)> {
-    urls.into_iter()
-        .filter(|(order, _)| !dir.join(file_name(order)).is_file())
-        .collect()
+/// 透過單次目錄讀取建立已存在檔案集合，避免在章節多時產生大量磁碟 stat 系統呼叫
+async fn remove_url_with_exist_file(
+    urls: Vec<(String, Url)>,
+    dir: &Path,
+) -> Result<Vec<(String, Url)>, NovelError> {
+    let mut existing_files = std::collections::HashSet::new();
+    let mut entries = tokio::fs::read_dir(dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        if let Ok(name) = entry.file_name().into_string() {
+            existing_files.insert(name);
+        }
+    }
+
+    Ok(urls
+        .into_iter()
+        .filter(|(order, _)| !existing_files.contains(&file_name(order)))
+        .collect())
 }
 
-async fn save_chapter(chapter: Chapter, dir: &Path) -> Result<(), NovelError> {
-    let path = dir.join(format!("{}.txt", chapter.order));
+async fn save_chapter(chapter: Chapter, dir: &Path, pb: &ProgressBar) -> Result<(), NovelError> {
+    let path = dir.join(file_name(&chapter.order));
     tokio::fs::write(path, chapter.content()).await?;
-    println!("{:>10} => 儲存成功：{}", "Saved", chapter.order);
+    pb.inc(1);
+    Ok(())
+}
+
+/// 暫停並提示使用者在實體 Chrome 視窗完成 Cloudflare 驗證
+/// 若傳入 ProgressBar，會先暫停進度條渲染以避免終端機畫面錯亂，並安全隔離同步輸入
+async fn wait_for_user_cf_verification(
+    context_msg: &str,
+    pb: Option<&ProgressBar>,
+) -> Result<(), NovelError> {
+    // 轉為擁有所有權的 String，滿足 spawn_blocking 所需的 'static 生命週期限制
+    let msg = context_msg.to_string();
+
+    let prompt_and_wait = move || {
+        eprintln!("\n🛑 [警告] {msg}，可能遇到了 Cloudflare 驗證盾！");
+        eprintln!("💡 請切換到跳出的 Chrome 視窗，手動完成點擊驗證。");
+        eprintln!("👉 驗證通過並看到目標畫面後，回到這裡按下 [Enter] 鍵繼續...");
+
+        // 通知 Tokio 排程器此處會短暫阻塞，確保背景 Chrome WebSocket handler 不受影響
+        tokio::task::block_in_place(|| {
+            let mut input = String::new();
+            let _ = io::stdin().read_line(&mut input);
+        });
+
+        println!("🔄 收到指令，正在重新讀取網頁...");
+    };
+
+    if let Some(bar) = pb {
+        bar.suspend(prompt_and_wait);
+    } else {
+        tokio::task::spawn_blocking(prompt_and_wait)
+            .await
+            .map_err(|e| NovelError::BrowserError(format!("讀取使用者輸入失敗: {e}")))?;
+    }
+
     Ok(())
 }
 
@@ -154,9 +202,10 @@ pub(crate) async fn download_novel(
     // 如果是測試環境，強迫開啟 headless 隱形模式，避免因為沒有 GUI 桌面導致 Chrome 無法開啟分頁
     let is_test = std::env::var("CARGO_MANIFEST_DIR").is_ok() && cfg!(test);
 
-    let mut config_builder = BrowserConfig::builder();
+    let mut config_builder =
+        BrowserConfig::builder().arg("--disable-blink-features=AutomationControlled");
 
-    // 🚀 chromiumoxide 預設就是無頭隱形模式
+    // chromiumoxide 預設就是無頭隱形模式
     // 只有在非測試環境（真正的 CLI 下載任務）下，才需要主動呼叫 .with_head() 彈出實體視窗
     if !is_test {
         config_builder = config_builder.with_head();
@@ -165,10 +214,10 @@ pub(crate) async fn download_novel(
     let config = config_builder
         .window_size(1280, 800)
         .build()
-        .map_err(|e| NovelError::BrowserError(e.clone()))?;
+        .map_err(NovelError::BrowserError)?;
 
     if !is_test {
-        println!("🚀 正在啟動本機 Chrome 瀏覽器系統...");
+        println!("🚀 正在啟動本機 Chrome 瀏覽器...");
     }
 
     let (mut browser, mut handler) = Browser::launch(config)
@@ -200,31 +249,36 @@ pub(crate) async fn download_novel(
     };
 
     if !is_test {
-        println!("🌐 正在導航至目錄頁：{url_contents}");
+        println!("🌐 導航至目錄頁：{url_contents}");
     }
 
     page.goto(url_contents)
         .await
         .map_err(|e| NovelError::BrowserError(e.to_string()))?;
 
-    // 第一次等待導航完成（此處可給予時間讓使用者處理初次的 CF 驗證）
-    page.wait_for_navigation()
-        .await
-        .map_err(|e| NovelError::BrowserError(e.to_string()))?;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    // 讀取經瀏覽器渲染解密後的完美 HTML 字串
-    let html = page
-        .content()
-        .await
-        .map_err(|e| NovelError::BrowserError(e.to_string()))?;
-    let document = visdom::Vis::load(html)?;
+    let (document, book) = loop {
+        let html = page
+            .content()
+            .await
+            .map_err(|e| NovelError::BrowserError(e.to_string()))?;
+        let doc = visdom::Vis::load(html)?;
 
-    let book = noveler.get_book_info(&document)?;
-    if book.author.is_empty() || book.name.is_empty() {
-        return Err(NovelError::BrowserError(
-            "無法讀取小說基本資訊，可能被 Cloudflare 阻擋。".to_string(),
-        ));
-    }
+        if let Ok(b) = noveler.get_book_info(&doc) {
+            if !b.author.is_empty() && !b.name.is_empty() {
+                break (doc, b);
+            }
+        }
+
+        if is_test {
+            return Err(NovelError::BrowserError(
+                "測試環境下無法讀取小說基本資訊。".to_string(),
+            ));
+        }
+
+        wait_for_user_cf_verification("無法讀取小說目錄資訊", None).await?;
+    };
 
     let dir = dir
         .join("temp")
@@ -234,15 +288,33 @@ pub(crate) async fn download_novel(
 
     let urls = noveler.get_chapter_urls_sorted(&document)?;
     let urls = noveler.append_urls_with_orders(urls);
-    let urls = remove_url_with_exist_file(urls, &dir);
 
-    println!(
-        "🎬 開始安全下載任務：{} (剩餘未下載章節: {} 章)",
-        book,
-        urls.len()
-    );
+    let total_book_chapters = urls.len() as u64;
+    let urls = remove_url_with_exist_file(urls, &dir).await?;
+    let remaining_chapters = urls.len() as u64;
+    let already_downloaded = total_book_chapters.saturating_sub(remaining_chapters);
 
-    // 3. 循序漸進地下載每一章節
+    if !is_test {
+        println!(
+            "🎬 任務：{book} (總計: {total_book_chapters} 章 | 已完成: {already_downloaded} 章 | 剩餘: {remaining_chapters} 章)",
+        );
+    }
+
+    let pb = if is_test {
+        ProgressBar::hidden()
+    } else {
+        let bar = ProgressBar::new(total_book_chapters);
+        bar.set_style(
+            ProgressStyle::with_template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) | 剩餘預估: {eta} | {msg}",
+            )
+            .unwrap_or_else(|_| ProgressStyle::default_bar())
+            .progress_chars("#>-"),
+        );
+        bar.set_position(already_downloaded);
+        bar
+    };
+
     for (order, mut current_url) in urls {
         let mut retry_success = false;
 
@@ -251,18 +323,24 @@ pub(crate) async fn download_novel(
         let mut combined_text = String::new();
 
         while !retry_success {
-            println!("👉 正在載入章節網頁 [{order}] => {current_url}");
-            if let Err(e) = page.goto(current_url.as_str()).await {
-                eprintln!("⚠️ 網頁跳轉失敗: {e}，即將重新載入...");
+            pb.set_message(format!("下載中 [{order}]"));
+
+            // 加入 15 秒跳轉逾時保護，避免網路卡死導致整個程式無限掛起
+            let goto_res =
+                tokio::time::timeout(Duration::from_secs(15), page.goto(current_url.as_str()))
+                    .await;
+
+            if !matches!(goto_res, Ok(Ok(_))) {
+                pb.println(format!("⚠️ [{order}] 網頁載入超時或失敗，2 秒後重試..."));
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 continue;
             }
 
-            // 模擬人類隨機閱讀延遲
-            let jitter = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-                Ok(dur) => (dur.as_micros() % 1000) as u64 + 500,
-                Err(_) => 1000, // 發生異常時的保底設定
-            };
+            // 結合奈秒時間與章節序號雜湊產生更自然的隨機延遲 (500ms ~ 1500ms)
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(500, |d| u64::from(d.subsec_nanos()));
+            let jitter = (nanos % 1000) + 500;
             tokio::time::sleep(Duration::from_millis(delay_base_ms + jitter)).await;
 
             let ch_html = page
@@ -287,11 +365,10 @@ pub(crate) async fn download_novel(
                 // 核心邏輯：檢查是否有章節內部的「下一頁」網址
                 match noveler.get_next_page(&ch_doc) {
                     Ok(Some(next_page_url)) => {
-                        println!("🔗 偵測到章節內分頁，準備跳轉至下一頁...");
-                        current_url = next_page_url; // 更新網址，繼續留在 while 迴圈抓下一頁
+                        pb.println(format!("🔗 [{order}] 偵測到章節分頁，繼續載入下一頁..."));
+                        current_url = next_page_url;
                     }
                     Ok(None) => {
-                        // 沒有下一頁了，這章完全抓完！
                         let final_chapter = Chapter {
                             order: order.clone(),
                             title: combined_title.clone(),
@@ -300,35 +377,32 @@ pub(crate) async fn download_novel(
 
                         // 丟入各平台自訂的清洗邏輯並儲存
                         let final_chapter = noveler.process_chapter(final_chapter);
-                        save_chapter(final_chapter, &dir).await?;
-
-                        retry_success = true; // 結束 while 迴圈，前往下一章
+                        save_chapter(final_chapter, &dir, &pb).await?;
+                        retry_success = true;
                     }
                     Err(e) => {
-                        eprintln!("⚠️ 尋找下一頁網址時發生錯誤: {e}");
-                        retry_success = true; // 避免死迴圈，直接跳過
+                        pb.println(format!("⚠️ [{order}] 解析下一頁網址錯誤: {e}"));
+                        retry_success = true;
                     }
                 }
             } else {
-                eprintln!("\n🛑 [警告] 無法解析網頁內文，可能遇到了 Cloudflare 驗證盾！");
-                eprintln!("💡 請切換到跳出的 Chrome 視窗，手動完成點擊驗證。");
-                eprintln!("👉 驗證通過並看到小說內文後，回到這裡按下 [Enter] 鍵繼續下載...");
-
-                let mut input = String::new();
-                let _ = io::stdin().read_line(&mut input);
-                println!("🔄 收到指令，嘗試重新解析當前網頁...");
+                if is_test {
+                    return Err(NovelError::BrowserError(format!(
+                        "測試環境下無法解析章節 [{order}] 內文。"
+                    )));
+                }
+                wait_for_user_cf_verification("無法解析網頁內文", Some(&pb)).await?;
             }
         }
     }
 
-    // 4. 下載完成，安全關閉本機 Chrome
-    println!("🎉 本書所有未下載章節抓取完畢，正在關閉瀏覽器...");
+    pb.finish_with_message("所有章節下載完成！");
     let _ = browser.close().await;
 
     Ok(dir)
 }
 
-/// 將目錄頁資料夾內的所有獨立 .txt 依序合併
+/// 將目錄頁資料夾內的所有獨立 .txt 依序高效合併（使用緩衝區寫入並保持輸出精簡）
 pub(crate) async fn combine_txt(dir: &Path) -> Result<(), NovelError> {
     let mut save_path = dir.to_path_buf();
     save_path.set_extension("txt");
@@ -337,27 +411,35 @@ pub(crate) async fn combine_txt(dir: &Path) -> Result<(), NovelError> {
     let mut paths: Vec<PathBuf> = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
-        if path.is_file() {
+        if path.extension().is_some_and(|ext| ext == "txt") && path.is_file() {
             paths.push(path);
         }
     }
     paths.sort_unstable();
 
+    let total_files = paths.len();
+    let save_path_clone = save_path.clone();
+
     tokio::task::spawn_blocking(move || -> Result<(), NovelError> {
-        let mut output = fs::File::create(&save_path)?;
+        let file = fs::File::create(&save_path_clone)?;
+        let mut writer = io::BufWriter::with_capacity(256 * 1024, file);
+
         for path in &paths {
             let mut input = fs::File::open(path)?;
-            io::copy(&mut input, &mut output)?;
-            write!(&mut output, "\n\n")?;
-            if let Some(name) = path.file_name() {
-                println!("Appended content of file: {}", name.display());
-            }
+            io::copy(&mut input, &mut writer)?;
+            writer.write_all(b"\n\n")?;
         }
-        println!("📝 所有章節檔案已成功合併至：{}", save_path.display());
+        writer.flush()?;
         Ok(())
     })
     .await
-    .expect("spawn_blocking panicked")?;
+    .map_err(|e| NovelError::StdIOError(io::Error::other(e.to_string())))??;
+
+    println!(
+        "📝 已將 {} 個章節合併至：{}",
+        total_files,
+        save_path.display()
+    );
 
     Ok(())
 }
@@ -463,7 +545,9 @@ mod tests {
             title: "title".to_string(),
             text: "text".to_string(),
         };
-        save_chapter(chapter.clone(), dir.path()).await.unwrap();
+        save_chapter(chapter.clone(), dir.path(), &ProgressBar::hidden())
+            .await
+            .unwrap();
 
         let file_path = dir.path().join(file_name(&chapter.order));
         assert!(file_path.is_file());
