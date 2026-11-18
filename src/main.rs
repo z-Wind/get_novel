@@ -21,7 +21,7 @@ use std::env;
 use std::path::Path;
 use std::process;
 
-use noveler::{combine_txt, download_novel, NovelError, PLATFORMS};
+use noveler::{NovelError, PLATFORMS, combine_txt, download_novel};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "基於 Chromiumoxide 的人機協同小說下載工具", long_about = None)]

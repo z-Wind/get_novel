@@ -230,11 +230,11 @@ pub(crate) async fn download_novel(
     // 新啟動的瀏覽器有時候分頁資料庫還在加載，使用簡單的非同步重試確保百分之百拿到初始分頁
     let mut page = None;
     for _ in 0..5 {
-        if let Ok(pages) = browser.pages().await {
-            if let Some(p) = pages.first().cloned() {
-                page = Some(p);
-                break;
-            }
+        if let Ok(pages) = browser.pages().await
+            && let Some(p) = pages.first().cloned()
+        {
+            page = Some(p);
+            break;
         }
         tokio::time::sleep(Duration::from_millis(150)).await;
     }
@@ -265,10 +265,11 @@ pub(crate) async fn download_novel(
             .map_err(|e| NovelError::BrowserError(e.to_string()))?;
         let doc = visdom::Vis::load(html)?;
 
-        if let Ok(b) = noveler.get_book_info(&doc) {
-            if !b.author.is_empty() && !b.name.is_empty() {
-                break (doc, b);
-            }
+        if let Ok(b) = noveler.get_book_info(&doc)
+            && !b.author.is_empty()
+            && !b.name.is_empty()
+        {
+            break (doc, b);
         }
 
         if is_test {
@@ -614,10 +615,11 @@ mod tests {
         .unwrap();
 
         for n in 1..=10u32 {
-            assert!(dir
-                .path()
-                .join(format!("temp/FakeNoveler/author_name/{n:05}.txt"))
-                .exists());
+            assert!(
+                dir.path()
+                    .join(format!("temp/FakeNoveler/author_name/{n:05}.txt"))
+                    .exists()
+            );
         }
         assert_eq!(
             tokio::fs::read_to_string(dir.path().join("temp/FakeNoveler/author_name/00001.txt"))
